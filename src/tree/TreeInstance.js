@@ -42,6 +42,7 @@ export class TreeInstance {
       lodD: new THREE.Vector4(),
       farLeaf: new THREE.Vector4(),
       wood: new THREE.Vector4(1, 1, 1, 0),
+      woodLod: new THREE.Vector4(),
       decal: new THREE.Vector4(),
     };
     this.shell = this.addMesh(shareGeometry(asset.shell.geometry), materials.shell, 'shell');
@@ -97,6 +98,10 @@ export class TreeInstance {
     e.shellLevel = steps - step;
     e.shellMorph = e.shellPoly * steps - step;
     e.coreLevel = Math.min(e.coreLevel, asset.core.maxLevel);
+    const woodSteps = asset.wood.ranges.length - 1;
+    const woodStep = Math.min(Math.floor(e.woodPoly * woodSteps), woodSteps);
+    e.woodDetail = woodSteps - woodStep;
+    e.woodMorph = e.woodPoly * woodSteps - woodStep;
     this.lod = e;
 
     state.lodA.set(e.near, e.shellLevel, e.shellMorph, 0);
@@ -105,6 +110,7 @@ export class TreeInstance {
     state.lodD.set(e.cutoff, e.dissolve, e.innerFade, 0);
     state.farLeaf.set(farCoverageScale(atlases.leaf, e.cutoff), farCoverageScale(atlases.inner, e.cutoff), 0, 0);
     state.wood.set(1, e.limbScale, e.twigScale, 0);
+    state.woodLod.set(e.woodDetail, e.woodMorph, 0, 0);
 
     this.shell.visible = e.shellActive;
     const shellRange = asset.shell.ranges[e.shellLevel];
@@ -121,7 +127,8 @@ export class TreeInstance {
     this.crown.geometry.setDrawRange(crownRange.start, crownRange.count);
 
     const woodLevel = e.twigScale > 0 ? 2 : e.limbScale > 0 ? 1 : 0;
-    this.wood.geometry.setDrawRange(0, asset.wood.countUpToLevel[woodLevel]);
+    const woodRange = asset.wood.ranges[e.woodDetail];
+    this.wood.geometry.setDrawRange(woodRange.start, woodRange.countUpTo[woodLevel]);
 
     for (const mesh of [this.shell, this.core, this.inner, this.crown]) mesh.userData.tint.w = tintAmount;
     this.updateDecal();

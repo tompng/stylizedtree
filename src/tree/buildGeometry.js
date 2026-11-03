@@ -448,58 +448,109 @@ function buildShell(tree, field, params, tiling) {
   return { geometry, patchCount, ranges, segments };
 }
 
+// Each branch is a grid of rings (along the curve) by radial vertices, drawn at three detail
+// levels that halve the ring count and, while at least three remain, the radial count
+// (trunk 12, 6, 3; limbs 8, 4, 4; twigs 6, 3, 3). Each level's grid is a subset of the next finer
+// one and all quads split along the same diagonal, so a vertex dropped at a level geomorphs (morph*
+// attributes) onto the coarser triangles at its own grid position and the switch is exact.
+// Faces are grouped by detail level, then by branch level, so that a prefix of a detail level's
+// range draws the trunk, trunk + limbs, or everything.
+const WOOD_RADIAL = [12, 8, 6];
+const WOOD_DETAIL_LEVELS = 3;
+
 function buildWood(tree, field) {
-  const buckets = [0, 1, 2].map(() => ({ positions: [], normals: [], axes: [], data: [], indices: [] }));
-  for (const branch of tree.branches) {
-    const bucket = buckets[branch.level];
+  const halve = (count) => (count % 2 === 0 && count / 2 >= 3 ? count / 2 : count);
+  const branches = [0, 1, 2].flatMap((level) => tree.branches.filter((b) => b.level === level));
+  const meshes = branches.map((branch) => {
     const length = branch.curve.getLength();
-    const lengthSegments = Math.max(4, Math.round(length / 0.25));
-    const radialSegments = [12, 8, 6][branch.level];
-    const frames = branch.curve.computeFrenetFrames(lengthSegments, false);
-    const v0 = bucket.positions.length / 3;
-    for (let i = 0; i <= lengthSegments; i++) {
-      const t = i / lengthSegments;
-      const p = branch.curve.getPointAt(t);
+    const rings = Math.max(4, Math.round(length / 0.25 / 4) * 4);
+    const radial = WOOD_RADIAL[branch.level];
+    const radials = [halve(halve(radial)), halve(radial), radial];
+    const steps = [0, 1, 2].map((d) => ({ ring: 2 ** (2 - d), radial: radial / radials[d] }));
+    const frames = branch.curve.computeFrenetFrames(rings, false);
+    const values = [];
+    for (let i = 0; i <= rings; i++) {
+      const t = i / rings;
+      const axis = branch.curve.getPointAt(t);
       const r = branch.radius(t);
       const N = frames.normals[i];
       const B = frames.binormals[i];
-      for (let j = 0; j <= radialSegments; j++) {
-        const a = (j / radialSegments) * Math.PI * 2;
+      for (let j = 0; j <= radial; j++) {
+        const a = (j / radial) * Math.PI * 2;
         const sin = Math.sin(a);
         const cos = -Math.cos(a);
-        const n = new THREE.Vector3(cos * N.x + sin * B.x, cos * N.y + sin * B.y, cos * N.z + sin * B.z).normalize();
-        const pos = p.clone().addScaledVector(n, r);
-        const ao = field.occlusion(pos.clone().addScaledVector(n, 0.03), n);
-        bucket.positions.push(pos.x, pos.y, pos.z);
-        bucket.normals.push(n.x, n.y, n.z);
-        bucket.axes.push(p.x, p.y, p.z);
-        bucket.data.push(branch.level, ao, branch.clusterIndex ?? -1, t);
+        const normal = new THREE.Vector3(cos * N.x + sin * B.x, cos * N.y + sin * B.y, cos * N.z + sin * B.z).normalize();
+        const pos = axis.clone().addScaledVector(normal, r);
+        const ao = field.occlusion(pos.clone().addScaledVector(normal, 0.03), normal);
+        values.push({ pos, normal, axis, ao, t });
       }
     }
-    for (let i = 1; i <= lengthSegments; i++) {
-      for (let j = 1; j <= radialSegments; j++) {
-        const a = v0 + (radialSegments + 1) * (i - 1) + (j - 1);
-        const b = v0 + (radialSegments + 1) * i + (j - 1);
-        const c = v0 + (radialSegments + 1) * i + j;
-        const d = v0 + (radialSegments + 1) * (i - 1) + j;
-        bucket.indices.push(a, b, d, b, c, d);
+    const at = (i, j) => values[i * (radial + 1) + j];
+    const birth = (i, j) => steps.findIndex((step) => i % step.ring === 0 && j % step.radial === 0);
+    const cellPoints = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    const triangles = [[0, 1, 3], [1, 2, 3]];
+    const vertices = values.map((value, k) => {
+      const i = Math.floor(k / (radial + 1));
+      const j = k % (radial + 1);
+      const d = birth(i, j);
+      if (d === 0) return { ...value, birth: 0, target: value };
+      const { ring, radial: radialStep } = steps[d - 1];
+      const i0 = Math.min(Math.floor(i / ring) * ring, rings - ring);
+      const j0 = Math.min(Math.floor(j / radialStep) * radialStep, radial - radialStep);
+      const corners = [at(i0, j0), at(i0, j0 + radialStep), at(i0 + ring, j0 + radialStep), at(i0 + ring, j0)];
+      const fu = (j - j0) / radialStep;
+      const fv = (i - i0) / ring;
+      const target = Object.fromEntries(['pos', 'normal', 'axis', 'ao', 't'].map((name) =>
+        [name, interpolateOnTriangles(triangles, cellPoints, corners.map((c) => c[name]), fu, fv)]));
+      return { ...value, birth: d, target };
+    });
+    const faces = steps.map(({ ring, radial: radialStep }) => {
+      const list = [];
+      for (let i = ring; i <= rings; i += ring) {
+        for (let j = radialStep; j <= radial; j += radialStep) {
+          const a = (i - ring) * (radial + 1) + (j - radialStep);
+          const b = i * (radial + 1) + (j - radialStep);
+          const c = i * (radial + 1) + j;
+          const d = (i - ring) * (radial + 1) + j;
+          list.push(a, b, d, b, c, d);
+        }
       }
-    }
-  }
-
-  const vertexCount = buckets.reduce((s, b) => s + b.positions.length / 3, 0);
-  const w = new AttributeWriter(vertexCount, { position: 3, normal: 3, axisPos: 3, woodData: 4 });
-  const indices = [];
-  const countUpToLevel = [];
-  let offset = 0;
-  buckets.forEach((bucket, level) => {
-    w.attributes.position.data.set(bucket.positions, offset * 3);
-    w.attributes.normal.data.set(bucket.normals, offset * 3);
-    w.attributes.axisPos.data.set(bucket.axes, offset * 3);
-    w.attributes.woodData.data.set(bucket.data, offset * 4);
-    for (const i of bucket.indices) indices.push(i + offset);
-    offset += bucket.positions.length / 3;
-    countUpToLevel[level] = indices.length;
+      return list;
+    });
+    return { branch, vertices, faces };
   });
-  return { geometry: w.toGeometry(indices), countUpToLevel };
+
+  const vertexCount = meshes.reduce((sum, m) => sum + m.vertices.length, 0);
+  const w = new AttributeWriter(vertexCount, {
+    position: 3, normal: 3, axisPos: 3, woodData: 4, morphPos: 3, morphNormal: 3, morphAxis: 3, morphData: 4,
+  });
+  const levelIndices = Array.from({ length: WOOD_DETAIL_LEVELS }, () => [[], [], []]);
+  let base = 0;
+  for (const { branch, vertices, faces } of meshes) {
+    vertices.forEach(({ pos, normal, axis, ao, t, birth, target }, k) => {
+      const index = base + k;
+      w.setVector('position', index, pos);
+      w.setVector('normal', index, normal);
+      w.setVector('axisPos', index, axis);
+      w.set('woodData', index, branch.level, ao, branch.clusterIndex ?? -1, t);
+      w.setVector('morphPos', index, target.pos);
+      w.setVector('morphNormal', index, target.normal);
+      w.setVector('morphAxis', index, target.axis);
+      w.set('morphData', index, target.ao, target.t, birth, 0);
+    });
+    faces.forEach((list, d) => {
+      for (const v of list) levelIndices[d][branch.level].push(base + v);
+    });
+    base += vertices.length;
+  }
+  const indices = [];
+  const ranges = levelIndices.map((byBranchLevel) => {
+    const start = indices.length;
+    const countUpTo = byBranchLevel.map((list) => {
+      for (const v of list) indices.push(v);
+      return indices.length - start;
+    });
+    return { start, countUpTo };
+  });
+  return { geometry: w.toGeometry(indices, { interleave: true }), ranges };
 }

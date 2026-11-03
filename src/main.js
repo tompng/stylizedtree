@@ -118,7 +118,7 @@ function buildGui() {
   fLod.add(lodSettings, 'bias', -3, 3, 0.01);
   fLod.add(lodSettings, 'referencePixels', 100, 1000, 10);
   const fStages = fLod.addFolder('stage ranges (L)').close();
-  for (const key of ['collapseStart', 'collapseEnd', 'shellPolyStart', 'corePolyStart', 'corePolyEnd', 'mergeStart', 'mergeEnd', 'crownPolyEnd']) {
+  for (const key of ['collapseStart', 'collapseEnd', 'shellPolyStart', 'woodPolyStart', 'woodPolyEnd', 'corePolyStart', 'corePolyEnd', 'mergeStart', 'mergeEnd', 'crownPolyEnd']) {
     fStages.add(lodSettings, key, 0, 10, 0.05);
   }
   const fStageParams = fLod.addFolder('stage params').close();
@@ -242,6 +242,7 @@ function updateHud(focus) {
       : e.crownActive
         ? `crown  level ${e.crownLevel}  morph ${fmt(e.crownMorph)}  dissolve ${fmt(e.dissolve)}`
         : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}  merge ${fmt(e.merge)}  dissolve ${fmt(e.dissolve)}`,
+    `wood   detail ${e.woodDetail}  morph ${fmt(e.woodMorph)}`,
     `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
     `atlas  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,
   ];

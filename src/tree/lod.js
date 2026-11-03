@@ -11,6 +11,9 @@ export const defaultLodSettings = {
   collapseEnd: 3.2,
   // Shell grid levels step down evenly from here to collapseEnd, the last step onto the core mesh.
   shellPolyStart: 1.4,
+  // Wood detail steps down twice, evenly over this range.
+  woodPolyStart: 2.5,
+  woodPolyEnd: 4.5,
   corePolyStart: 3.6,
   corePolyEnd: 4.4,
   mergeStart: 3.8,
@@ -24,6 +27,7 @@ export const defaultLodSettings = {
 export function evaluateLod(level, s) {
   const collapse = smoothstep(s.collapseStart, s.collapseEnd, level);
   const shellPoly = clamp((level - s.shellPolyStart) / Math.max(s.collapseEnd - s.shellPolyStart, 1e-3), 0, 1);
+  const woodPoly = clamp((level - s.woodPolyStart) / Math.max(s.woodPolyEnd - s.woodPolyStart, 1e-3), 0, 1);
   const coreT = clamp((level - s.corePolyStart) / Math.max(s.corePolyEnd - s.corePolyStart, 1e-3), 0, 1);
   const merge = smoothstep(s.mergeStart, s.mergeEnd, level);
   const crownT = 2 * clamp((level - s.mergeEnd) / Math.max(s.crownPolyEnd - s.mergeEnd, 1e-3), 0, 1);
@@ -33,6 +37,7 @@ export function evaluateLod(level, s) {
     level,
     near: 1 - collapse,
     shellPoly,
+    woodPoly,
     shellActive: level < s.collapseEnd,
     cutoff: lerp(s.cutoffNear, s.cutoffFar, collapse),
     dissolve: smoothstep(s.collapseEnd, s.mergeStart, level) * limbScale,

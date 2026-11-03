@@ -23,6 +23,7 @@ import shellWindSrc from '../shaders/shell_wind.wgsl?raw';
 import sunVisibilitySrc from '../shaders/sun_visibility.wgsl?raw';
 import windOffsetSrc from '../shaders/wind_offset.wgsl?raw';
 import woodPositionSrc from '../shaders/wood_position.wgsl?raw';
+import woodMorphSrc from '../shaders/wood_morph.wgsl?raw';
 import woodShadeSrc from '../shaders/wood_shade.wgsl?raw';
 import woodWindSrc from '../shaders/wood_wind.wgsl?raw';
 
@@ -42,6 +43,7 @@ const clusterBend = fn(clusterBendSrc);
 const clusterDeform = fn(clusterDeformSrc);
 const patchTilt = fn(patchTiltSrc);
 const woodWind = fn(woodWindSrc);
+const woodMorph = fn(woodMorphSrc);
 const rotateVector = fn(rotateVectorSrc);
 const decalPosition = fn(decalPositionSrc);
 const sunVisibilityAt = fn(sunVisibilitySrc);
@@ -125,6 +127,8 @@ export const instanceUniforms = {
   // farCoverageScale of the shell and inner atlases at the instance's cutoff
   farLeaf: perInstance('farLeaf', new THREE.Vector4(1, 1, 0, 0)),
   wood: perInstance('wood', new THREE.Vector4(1, 1, 1, 0)),
+  // drawn wood detail level, geomorph toward the next coarser level
+  woodLod: perInstance('woodLod', new THREE.Vector4(2, 0, 0, 0)),
   decal: perInstance('decal', new THREE.Vector4(0, 0, 1, 1)),
 };
 
@@ -367,17 +371,21 @@ export function createTreeMaterials(asset, atlases) {
   const wood = new THREE.MeshBasicNodeMaterial();
   wood.fog = false;
   {
-    const woodData = attribute('woodData', 'vec4');
-    const axisPos = attribute('axisPos', 'vec3');
-    const rest = woodRestPosition({ pos: attribute('position', 'vec3'), axisPos, woodData, lodW: I.wood });
+    const morphData = attribute('morphData', 'vec4');
+    const morph = woodMorph({ morphData, woodLod: I.woodLod });
+    const baseData = attribute('woodData', 'vec4');
+    const woodData = vec4(baseData.x, mix(baseData.y, morphData.x, morph), baseData.z, mix(baseData.w, morphData.y, morph));
+    const axisPos = mix(attribute('axisPos', 'vec3'), attribute('morphAxis', 'vec3'), morph);
+    const pos = mix(attribute('position', 'vec3'), attribute('morphPos', 'vec3'), morph);
+    const rest = woodRestPosition({ pos, axisPos, woodData, lodW: I.wood });
     wood.positionNode = rest.add(woodWind({ pos: rest, axisPos, woodData, ...windArgs, lodW: I.wood }));
     wood.colorNode = woodShade({
-      n: attribute('normal', 'vec3'),
+      n: varying(mix(attribute('normal', 'vec3'), attribute('morphNormal', 'vec3'), morph)),
       posLocal: varying(rest),
       camLocal: I.cam,
       sun: I.sun,
       sunVis: sunVisibility(rest),
-      woodData,
+      woodData: varying(woodData),
       cWood: palette.wood,
       cWoodShadow: palette.woodShadow,
       cSky: palette.sky,
