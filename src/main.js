@@ -138,6 +138,7 @@ function buildGui() {
   fTree.add(shellParams, 'patchesPerCluster', 6, 80, 1).onFinishChange(rebuild);
   fTree.add(shellParams, 'overlap', 0.8, 5, 0.05).onFinishChange(rebuild);
   fTree.add(shellParams, 'flare', 0, 0.6, 0.01).onFinishChange(rebuild);
+  fTree.add(shellParams, 'depth', 0, 0.8, 0.01).onFinishChange(rebuild);
   fTree.add(shellParams, 'gridSegments', 1, 8, 1).onFinishChange(rebuild);
   fTree.add(shellParams, 'crownSmooth', 0.05, 3, 0.05).onFinishChange(rebuild);
 
@@ -174,6 +175,7 @@ function buildGui() {
   vec(fLook, params.tone, 0, 'contrast', 0.2, 1.2, 0.01);
   vec(fLook, params.tone, 1, 'shadowFloor', 0, 1, 0.01);
   vec(fLook, params.tone, 2, 'aoStrength', 0, 1, 0.01);
+  vec(fLook, params.tone, 3, 'depthShade', 0, 1, 0.01);
   vec(fLook, params.shadow, 0, 'selfShadowDensity', 0, 1, 0.01);
   vec(fLook, params.shadow, 1, 'selfShadowSoftness', 0.01, 1, 0.01);
   vec(fLook, params.groundShadow, 0, 'groundShadow', 0, 1, 0.01);

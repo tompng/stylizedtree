@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, float, mix, screenCoordinate, texture, uniform, uv, varying, vec3, vec4, wgsl, wgslFn } from 'three/tsl';
+import { attribute, float, mix, screenCoordinate, texture, uniform, varying, vec3, vec4, wgsl, wgslFn } from 'three/tsl';
 import commonSrc from '../shaders/common.wgsl?raw';
 import corePositionSrc from '../shaders/core_position.wgsl?raw';
 import crownPositionSrc from '../shaders/crown_position.wgsl?raw';
@@ -55,8 +55,8 @@ export const palette = {
 
 // Packed vec4 layouts must match the `let` unpacking at the top of each WGSL function.
 export const stylePresets = {
-  soft: { ramp: [0.42, 0.66, 0.16, 0.1], edge: [0.6, 0.25, 0, 0], tone: [0.75, 0.4, 0.7, 0] },
-  crisp: { ramp: [0.42, 0.66, 0.05, 0.16], edge: [0, 0, 0, 0], tone: [1, 0.12, 1, 0] },
+  soft: { ramp: [0.42, 0.66, 0.16, 0.1], edge: [0.6, 0.25, 0, 0], tone: [0.75, 0.4, 0.7, 0.65] },
+  crisp: { ramp: [0.42, 0.66, 0.05, 0.16], edge: [0, 0, 0, 0], tone: [1, 0.12, 1, 0.65] },
 };
 
 export const params = {
@@ -68,8 +68,8 @@ export const params = {
   look2: uniform(new THREE.Vector4(0.35, 0.25, 1.6, 1.8)),
   // edgeSoftness, alphaDither, -, -
   edge: uniform(new THREE.Vector4(0.6, 0.25, 0, 0)),
-  // contrast, shadowFloor, aoStrength, -
-  tone: uniform(new THREE.Vector4(0.75, 0.4, 0.7, 0)),
+  // contrast, shadowFloor, aoStrength, depthShade (AO of the deepest shell patches)
+  tone: uniform(new THREE.Vector4(0.75, 0.4, 0.7, 0.65)),
   // density, softness (cluster-to-cluster sun occlusion)
   shadow: uniform(new THREE.Vector4(0.8, 0.35, 0, 0)),
   // strength, breakup, density, softness (ground shadow)
@@ -148,9 +148,11 @@ export function createTreeMaterials(asset, leafAtlas) {
     const patchData = attribute('patchData', 'vec4');
     const patchCenter = attribute('patchCenter', 'vec3');
     const shadeNear = attribute('shadeNear', 'vec4');
+    const leafUv = attribute('leafUv', 'vec4');
+    const ao = shadeNear.w.mul(mix(float(1), params.tone.w, leafUv.z.mul(I.lodD.w)));
     const rest = shellRestPosition({
       basePos: attribute('position', 'vec3'),
-      flareVec: attribute('flareVec', 'vec3'),
+      nearOffset: attribute('nearOffset', 'vec3'),
       patchCenter,
       patchData,
       lodA: I.lodA,
@@ -160,10 +162,10 @@ export function createTreeMaterials(asset, leafAtlas) {
       ...shadeArgs,
       nProxy: shadeNear.xyz,
       nDetail: vec4(attribute('nPatch', 'vec3'), params.look2.x.mul(I.lodD.w)),
-      shadeIn: vec4(shadeNear.w, shadeNear.w, 1, 0),
+      shadeIn: vec4(ao, ao, 1, 0),
       posLocal: varying(rest),
       sunVis: sunVisibility(rest),
-      leaf: leafSample({ tex: leafTex, samp: leafTex, uv: uv(), cutoff: I.lodD.x, mipScale: params.look2.y, patchRand: patchData.y, softness: params.edge.x }),
+      leaf: leafSample({ tex: leafTex, samp: leafTex, uv: leafUv.xy, cutoff: I.lodD.x, mipScale: params.look2.y, patchRand: patchData.y, softness: params.edge.x }),
       misc: vec4(patchData.w, patchData.z, 0, 0),
       noisePos: vec3(0),
       solidFill: float(1),

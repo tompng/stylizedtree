@@ -8,6 +8,7 @@ export const defaultShellParams = {
   patchesPerCluster: 30,
   overlap: 2.2,
   flare: 0.16,
+  depth: 0.35,
   gridSegments: 4,
   crownSmooth: 1.0,
 };
@@ -170,6 +171,7 @@ function buildShell(tree, field, params) {
         dir: d,
         angle: angle * rng.range(0.85, 1.15),
         lift: rng.range(0, 0.06),
+        depth: rng.next(),
         flare: params.flare * rng.range(0.7, 1.3),
         uvRotation: rng.next() * Math.PI * 2,
         cell: Math.floor(rng.next() * 4),
@@ -185,7 +187,7 @@ function buildShell(tree, field, params) {
   const side = segments + 1;
   const perPatch = side * side;
   const w = new AttributeWriter(patches.length * perPatch, {
-    position: 3, flareVec: 3, patchCenter: 3, uv: 2, patchData: 4, shadeNear: 4, nPatch: 3,
+    position: 3, nearOffset: 3, patchCenter: 3, leafUv: 4, patchData: 4, shadeNear: 4, nPatch: 3,
   });
   const indices = [];
   let maxFlare = 0;
@@ -196,7 +198,8 @@ function buildShell(tree, field, params) {
     const t2 = new THREE.Vector3().crossVectors(dir, t1);
     const tanA = Math.tan(patch.angle);
     const shellRadius = 1 + patch.lift;
-    const center = clusterSurfacePoint(cluster, dir, shellRadius);
+    const nearScale = 1 - params.depth * patch.depth;
+    const center = clusterSurfacePoint(cluster, dir, shellRadius * nearScale);
     const cos = Math.cos(patch.uvRotation);
     const sin = Math.sin(patch.uvRotation);
     const cellU = patch.cell % 2;
@@ -214,9 +217,11 @@ function buildShell(tree, field, params) {
         const base = clusterSurfacePoint(cluster, d, shellRadius);
         const nProxy = clusterNormal(cluster, base);
         const s = Math.hypot(u, v);
-        const flareVec = nProxy.clone().multiplyScalar(patch.flare * cluster.radius * s * s);
-        maxFlare = Math.max(maxFlare, flareVec.length());
-        flared.push(base.clone().add(flareVec));
+        const near = base.clone().sub(cluster.center).multiplyScalar(nearScale).add(cluster.center)
+          .addScaledVector(nProxy, patch.flare * cluster.radius * nearScale * s * s);
+        const nearOffset = near.clone().sub(base);
+        maxFlare = Math.max(maxFlare, nearOffset.length());
+        flared.push(near);
         proxies.push(nProxy);
 
         let ru = u * cos - v * sin;
@@ -224,9 +229,9 @@ function buildShell(tree, field, params) {
         if (patch.mirror) ru = -ru;
         const ao = field.occlusion(base.clone().addScaledVector(nProxy, 0.03), nProxy, patch.ci);
         w.setVector('position', index, base);
-        w.setVector('flareVec', index, flareVec);
+        w.setVector('nearOffset', index, nearOffset);
         w.setVector('patchCenter', index, center);
-        w.set('uv', index, (cellU + 0.5 + 0.5 * UV_EXTENT * ru) / 2, (cellV + 0.5 + 0.5 * UV_EXTENT * rv) / 2);
+        w.set('leafUv', index, (cellU + 0.5 + 0.5 * UV_EXTENT * ru) / 2, (cellV + 0.5 + 0.5 * UV_EXTENT * rv) / 2, patch.depth, 0);
         w.set('patchData', index, rank, patch.rand, Math.min(s, 1), patch.ci);
         w.setVector('shadeNear', index, nProxy, ao);
       }
