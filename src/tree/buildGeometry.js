@@ -8,6 +8,8 @@ export const defaultShellParams = {
   patchDivisions: 2,
   overlap: 4,
   flare: 0.4,
+  // outward, inward (each patch curls toward the cluster center), or random (either, per patch)
+  flareDirection: 'outward',
   depth: 0.35,
   gridSegments: 3,
   crownSmooth: 1.0,
@@ -250,6 +252,8 @@ function buildShell(tree, field, params) {
           const grow = scale * rng.range(0.9, 1.1);
           const flare = params.flare * rng.range(0.7, 1.3);
           const rand = rng.next();
+          const flip = rng.next() < 0.5;
+          const flareSign = params.flareDirection === 'inward' || (params.flareDirection === 'random' && flip) ? -1 : 1;
           const center = clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + 0.5) / n, (j + 0.5) / n));
           const nearCenter = center.clone().sub(cluster.center).multiplyScalar(nearScale).add(cluster.center);
           const near = [];
@@ -267,7 +271,7 @@ function buildShell(tree, field, params) {
               const t = 2 * sv - 1;
               const p = far.clone().sub(center).multiplyScalar(grow).add(center)
                 .sub(cluster.center).multiplyScalar(nearScale).add(cluster.center)
-                .addScaledVector(nProxy, flare * cluster.radius * nearScale * (s * s + t * t) * 0.5);
+                .addScaledVector(nProxy, flareSign * flare * cluster.radius * nearScale * (s * s + t * t) * 0.5);
               const offset = p.clone().sub(far);
               maxOffset = Math.max(maxOffset, offset.length());
               near.push(p);
