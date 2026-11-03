@@ -116,7 +116,7 @@ fn st_clusterSdf(p: vec3f, ci: i32, spheres: texture_2d<f32>, lobeCount: i32) ->
   let n = q / len;
   var s = shape.x;
   for (var k = 0; k < lobeCount; k = k + 1) {
-    let lobe = textureLoad(spheres, vec2i(ci, 4 + k), 0);
+    let lobe = textureLoad(spheres, vec2i(ci, 5 + k), 0);
     s = s + lobe.w * exp(shape.y * (dot(n, lobe.xyz) - 1.0));
   }
   let g = max(length(q / a), 0.000001);
@@ -133,7 +133,7 @@ fn st_clusterNormal(p: vec3f, ci: i32, spheres: texture_2d<f32>, lobeCount: i32)
   var s = shape.x;
   var ds = vec3f(0.0);
   for (var k = 0; k < lobeCount; k = k + 1) {
-    let lobe = textureLoad(spheres, vec2i(ci, 4 + k), 0);
+    let lobe = textureLoad(spheres, vec2i(ci, 5 + k), 0);
     let d = dot(n, lobe.xyz);
     let e = lobe.w * exp(shape.y * (d - 1.0));
     s = s + e;

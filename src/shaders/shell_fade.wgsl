@@ -1,4 +1,4 @@
-// Threshold on the leaf core field (leafSample): leaves shrink toward their own centers near the
+// Threshold on the leaf core field (st_leafSampleGrad): leaves shrink toward their own centers near the
 // patch outline (bump 16x(1-x)y(1-y) in patch-local coordinates) and on patches seen edge-on,
 // instead of being cut by the patch edge or turned into wide semi-transparent areas.
 fn shellFadeThreshold(patchUv: vec2f, nPatch: vec3f, posLocal: vec3f, camLocal: vec3f, patchFade: vec4f, near: f32) -> f32 {

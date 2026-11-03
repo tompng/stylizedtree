@@ -1,29 +1,13 @@
 import * as THREE from 'three/webgpu';
 import { Rng } from '../math.js';
 
-// Disc radius inside each atlas cell. Must match the 0.96 in leaf_uv.wgsl and inner_leaf.wgsl.
+// Disc radius inside each atlas cell. Must match the 0.96 in leaf_sphere_sample.wgsl.
 const DISC = 0.96;
 
-// Leaf patterns per layout. `coverage` is the span of 1 - cos(polar angle) the leaves are spread
-// over (1 = upper hemisphere, 2 = whole sphere) and `halves` the cells each pattern is drawn into.
-// hemispheres: four independent hemispheres; the shell mirrors each onto both halves of a cluster
-// (`mirrored`). spheres: two whole spheres, the upper half in cell 2p and the lower half in 2p + 1.
-const LAYOUTS = {
-  hemispheres: [0, 1, 2, 3].map((cellIndex) => ({
-    coverage: 1,
-    mirrored: true,
-    halves: [{ cellIndex, sign: 1 }],
-  })),
-  spheres: [0, 1].map((p) => ({
-    coverage: 2,
-    mirrored: false,
-    halves: [{ cellIndex: 2 * p, sign: 1 }, { cellIndex: 2 * p + 1, sign: -1 }],
-  })),
-};
-
-// 2x2 atlas. Each cell is one hemisphere in Lambert azimuthal equal-area projection
-// (leaf_uv.wgsl), so leaves placed uniformly in the disc are uniform on the sphere. Each leaf is
-// drawn through the projection's Jacobian at its position so it keeps its shape on the sphere.
+// 2x2 atlas holding two whole-sphere leaf patterns: pattern p has its upper hemisphere in cell 2p
+// and its lower hemisphere in cell 2p + 1, each a disc in Lambert azimuthal equal-area projection
+// (leaf_sphere_sample.wgsl), so leaves placed uniformly on the sphere are uniform in the discs.
+// Each leaf is drawn through the projection's Jacobian at its position so it keeps its shape on the sphere.
 // Channels: R = coverage (blurred so its edge can be sharpened with fwidth or kept soft),
 // G = per-leaf random (dilated past the leaf so the blurred fringe carries the leaf's value),
 // B = per-leaf brush gradient, A = leaf core (1 at each leaf center, falling to 0 just past its
@@ -32,8 +16,7 @@ const LAYOUTS = {
 export function createLeafAtlas({
   seed = 11,
   cell = 1024,
-  layout = 'hemispheres',
-  candidates = 20000,
+  candidates = 40000,
   leafLength = [0.07, 0.12],
   leafAspect = [0.5, 0.7],
   gapPixels = 3,
@@ -60,9 +43,9 @@ export function createLeafAtlas({
   const R = (cell / 2) * DISC;
   // The projection never maps a radian to fewer than R / 2 pixels.
   const gap = gapPixels / (R / 2);
-  for (const pattern of LAYOUTS[layout]) {
+  for (let pattern = 0; pattern < 2; pattern++) {
     const pool = Array.from({ length: candidates }, () => {
-      const theta = Math.acos(1 - pattern.coverage * rng.next());
+      const theta = Math.acos(1 - 2 * rng.next());
       const phi = rng.next() * Math.PI * 2;
       const length = rng.range(leafLength[0], leafLength[1]);
       return {
@@ -74,9 +57,10 @@ export function createLeafAtlas({
         rand: rng.next(),
       };
     });
-    const leaves = placeApart(pool, { reach: leafLength[1], gap, mirrored: pattern.mirrored });
+    const leaves = placeApart(pool, { reach: leafLength[1], gap });
 
-    for (const { cellIndex, sign } of pattern.halves) {
+    for (const sign of [1, -1]) {
+      const cellIndex = 2 * pattern + (sign > 0 ? 0 : 1);
       const ox = (cellIndex % 2) * cell;
       const oy = Math.floor(cellIndex / 2) * cell;
       // Leaves of the other hemisphere that reach across the equator are drawn as well, through the
@@ -141,10 +125,7 @@ export function createLeafAtlas({
 // Touching leaves would merge into one smooth blob once the coverage is blurred and thresholded,
 // reading as one large leaf. Candidates are placed largest first and dropped when they come within
 // `gap` of a placed leaf, testing each ellipse as the capsule that contains it, on the unit sphere.
-// The shell shows mirrored patterns reflected across the equator, so the reflections of placed
-// leaves count as placed leaves too. A leaf may still overlap its own reflection: keeping it clear
-// of that as well would line the leaves up along the equator with a straight gap between the rows.
-function placeApart(pool, { reach, gap, mirrored }) {
+function placeApart(pool, { reach, gap }) {
   const cellSize = reach + gap;
   const grid = new Map();
   const keyOf = ([x, y, z]) => `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)},${Math.floor(z / cellSize)}`;
@@ -163,8 +144,7 @@ function placeApart(pool, { reach, gap, mirrored }) {
   const placed = [];
   for (const leaf of [...pool].sort((a, b) => b.length - a.length)) {
     const capsule = leafCapsule(leaf);
-    const probes = mirrored ? [capsule, mirrorCapsule(capsule)] : [capsule];
-    if (!probes.every((probe) => near(probe.center).every((other) => clear(probe, other)))) continue;
+    if (!near(capsule.center).every((other) => clear(capsule, other))) continue;
     const key = keyOf(capsule.center);
     if (!grid.has(key)) grid.set(key, []);
     grid.get(key).push(capsule);
@@ -192,11 +172,6 @@ function leafCapsule({ theta, phi, heading, length, width }) {
     p0: center.map((c, i) => c - axis[i] * half),
     p1: center.map((c, i) => c + axis[i] * half),
   };
-}
-
-function mirrorCapsule({ center, radius, p0, p1 }) {
-  const flip = ([x, y, z]) => [x, -y, z];
-  return { center: flip(center), radius, p0: flip(p0), p1: flip(p1) };
 }
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];

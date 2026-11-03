@@ -38,7 +38,7 @@ const env = { sunAzimuth: 140, sunElevation: 38, windStrength: 0.35, windDirecti
 const view = { layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft', innerBall: true };
 const atlases = {
   leaf: createLeafAtlas(),
-  inner: createLeafAtlas({ seed: 23, cell: 512, layout: 'spheres', leafLength: [0.13, 0.22] }),
+  inner: createLeafAtlas({ seed: 23, cell: 512, leafLength: [0.13, 0.22] }),
 };
 
 let asset = null;

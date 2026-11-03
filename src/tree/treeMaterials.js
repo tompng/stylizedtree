@@ -7,10 +7,8 @@ import decalPositionSrc from '../shaders/decal_position.wgsl?raw';
 import decalShadeSrc from '../shaders/decal_shade.wgsl?raw';
 import foliageShadeSrc from '../shaders/foliage_shade.wgsl?raw';
 import innerFadeSrc from '../shaders/inner_fade.wgsl?raw';
-import innerLeafSrc from '../shaders/inner_leaf.wgsl?raw';
-import leafSampleSrc from '../shaders/leaf_sample.wgsl?raw';
 import leafSampleCoreSrc from '../shaders/leaf_sample_core.wgsl?raw';
-import leafUvSrc from '../shaders/leaf_uv.wgsl?raw';
+import leafSphereSampleSrc from '../shaders/leaf_sphere_sample.wgsl?raw';
 import shellFadeSrc from '../shaders/shell_fade.wgsl?raw';
 import proxyNormalSrc from '../shaders/proxy_normal.wgsl?raw';
 import shellPositionSrc from '../shaders/shell_position.wgsl?raw';
@@ -32,10 +30,8 @@ const windOffsetAt = fn(windOffsetSrc);
 const decalPosition = fn(decalPositionSrc);
 const sunVisibilityAt = fn(sunVisibilitySrc);
 const proxyNormal = fn(proxyNormalSrc);
-const leafSample = fn(leafSampleSrc, [leafSampleCore]);
-const innerLeafSample = fn(innerLeafSrc, [leafSampleCore]);
+const leafSphereSample = fn(leafSphereSampleSrc, [leafSampleCore]);
 const innerFadeThreshold = fn(innerFadeSrc);
-const leafUv = fn(leafUvSrc);
 const shellFadeThreshold = fn(shellFadeSrc);
 const foliageShade = fn(foliageShadeSrc);
 const woodShade = fn(woodShadeSrc);
@@ -180,10 +176,12 @@ export function createTreeMaterials(asset, atlases) {
       shadeIn: vec4(ao, ao, 1, 0),
       posLocal: restV,
       sunVis: sunVisibility(rest),
-      leaf: leafSample({
+      leaf: leafSphereSample({
         tex: leafTex,
         samp: leafTex,
-        uv: leafUv({ p: farV, clusterIndex, spheres }),
+        p: farV,
+        clusterIndex,
+        spheres,
         cutoff: I.lodD.x,
         mipScale: params.look2.y,
         patchRand: mix(float(0.5), patchData.y, near),
@@ -221,10 +219,12 @@ export function createTreeMaterials(asset, atlases) {
     const unmerged = varying(coreRestPosition({ ...coreArgs, lodB: vec4(I.lodB.xyz, 0) }));
     core.positionNode = rest.add(windAt(mix(cCenter, crownPos, merge), coreData.y, float(1).sub(merge)));
     const restV = varying(rest);
-    const leaf = leafSample({
+    const leaf = leafSphereSample({
       tex: leafTex,
       samp: leafTex,
-      uv: leafUv({ p: unmerged, clusterIndex: coreData.y, spheres }),
+      p: unmerged,
+      clusterIndex: coreData.y,
+      spheres,
       cutoff: I.lodD.x,
       mipScale: params.look2.y,
       patchRand: float(0.5),
@@ -263,7 +263,7 @@ export function createTreeMaterials(asset, atlases) {
       shadeIn: vec4(shade, shade, 1, 0),
       posLocal: restV,
       sunVis: sunVisibility(rest),
-      leaf: innerLeafSample({
+      leaf: leafSphereSample({
         tex: innerTex,
         samp: innerTex,
         p: restV,

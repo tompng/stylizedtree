@@ -67,20 +67,22 @@ export function disposeTreeAsset(asset) {
 }
 
 // Rows: 0 = center + shadow radius (0 casts no shadow), 1 = wood chain points, 2 = axes,
-// 3 = lobe base, lobe sharpness, leaf atlas yaw, leaf atlas cell, 4.. = one lobe (direction, weight) per row.
+// 3 = lobe base, lobe sharpness, leaf atlas pattern, -, 4 = leaf atlas rotation quaternion,
+// 5.. = one lobe (direction, weight) per row.
 function buildSphereTexture(tree) {
   const rng = new Rng(tree.seed * 13 + 5);
   const width = Math.max(tree.clusters.length, tree.woodChains.length, 1);
   const lobeCount = tree.clusters[0].shape.lobes.length;
-  const height = 4 + lobeCount;
+  const height = 5 + lobeCount;
   const data = new Float32Array(width * height * 4);
   const put = (row, column, values) => data.set(values, (width * row + column) * 4);
   tree.clusters.forEach((c, i) => {
     const shadowRadius = c.isFiller ? 0 : Math.cbrt(c.axes.x * c.axes.y * c.axes.z) * 0.95;
     put(0, i, [c.center.x, c.center.y, c.center.z, shadowRadius]);
     put(2, i, [c.axes.x, c.axes.y, c.axes.z, 0]);
-    put(3, i, [c.shape.base, c.shape.sharpness, rng.next() * Math.PI * 2, Math.floor(rng.next() * 4)]);
-    c.shape.lobes.forEach(({ dir, weight }, k) => put(4 + k, i, [dir.x, dir.y, dir.z, weight]));
+    put(3, i, [c.shape.base, c.shape.sharpness, rng.next() < 0.5 ? 0 : 1, 0]);
+    put(4, i, randomQuaternion(rng));
+    c.shape.lobes.forEach(({ dir, weight }, k) => put(5 + k, i, [dir.x, dir.y, dir.z, weight]));
   });
   tree.woodChains.forEach((s, i) => put(1, i, [s.center.x, s.center.y, s.center.z, s.radius]));
   const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
@@ -89,6 +91,16 @@ function buildSphereTexture(tree) {
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
   return texture;
+}
+
+// Uniformly distributed rotation (Shoemake, Graphics Gems III), as [x, y, z, w].
+function randomQuaternion(rng) {
+  const u1 = rng.next();
+  const a = rng.next() * Math.PI * 2;
+  const b = rng.next() * Math.PI * 2;
+  const s = Math.sqrt(1 - u1);
+  const t = Math.sqrt(u1);
+  return [s * Math.sin(a), s * Math.cos(a), t * Math.sin(b), t * Math.cos(b)];
 }
 
 function levelRanges(maxLevel, groupCount, verticesPerGroup, levels) {
