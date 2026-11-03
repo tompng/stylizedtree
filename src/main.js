@@ -111,16 +111,12 @@ function buildGui() {
   fLod.add(lodSettings, 'bias', -3, 3, 0.01);
   fLod.add(lodSettings, 'referencePixels', 100, 1000, 10);
   const fStages = fLod.addFolder('stage ranges (L)').close();
-  for (const key of ['fillStart', 'fillEnd', 'pruneStart', 'pruneEnd', 'flareStart', 'flareEnd', 'corePolyStart', 'corePolyEnd', 'mergeStart', 'mergeEnd', 'crownPolyEnd']) {
+  for (const key of ['collapseStart', 'collapseEnd', 'corePolyStart', 'corePolyEnd', 'mergeStart', 'mergeEnd', 'crownPolyEnd']) {
     fStages.add(lodSettings, key, 0, 10, 0.05);
   }
   const fStageParams = fLod.addFolder('stage params').close();
   fStageParams.add(lodSettings, 'cutoffNear', 0, 1, 0.01);
   fStageParams.add(lodSettings, 'cutoffFar', 0, 1, 0.01);
-  fStageParams.add(lodSettings, 'coreScale', 0.8, 1.05, 0.005);
-  fStageParams.add(lodSettings, 'aoInner', 0, 1, 0.01);
-  fStageParams.add(lodSettings, 'compensation', 0, 1, 0.01);
-  fStageParams.add(lodSettings, 'pruneFade', 0.01, 0.3, 0.01);
 
   const fTree = gui.addFolder('Tree (rebuild)').close();
   fTree.add(treeParams, 'seed', 1, 200, 1).onFinishChange(rebuild);
@@ -135,8 +131,8 @@ function buildGui() {
   fTree.add(treeParams, 'lobeSharpness', 0.5, 12, 0.1).onFinishChange(rebuild);
   fTree.add(treeParams, 'trunkRadius', 0.1, 0.8, 0.01).onFinishChange(rebuild);
   fTree.add(treeParams, 'limbCount', 1, 7, 1).onFinishChange(rebuild);
-  fTree.add(shellParams, 'patchesPerCluster', 6, 80, 1).onFinishChange(rebuild);
-  fTree.add(shellParams, 'overlap', 0.8, 5, 0.05).onFinishChange(rebuild);
+  fTree.add(shellParams, 'patchDivisions', 1, 3, 1).onFinishChange(rebuild);
+  fTree.add(shellParams, 'overlap', 1, 5, 0.05).onFinishChange(rebuild);
   fTree.add(shellParams, 'flare', 0, 0.6, 0.01).onFinishChange(rebuild);
   fTree.add(shellParams, 'depth', 0, 0.8, 0.01).onFinishChange(rebuild);
   fTree.add(shellParams, 'gridSegments', 1, 8, 1).onFinishChange(rebuild);
@@ -169,9 +165,13 @@ function buildGui() {
   vec(fLook, params.look2, 0, 'patchNormalWeight', 0, 1, 0.01);
   vec(fLook, params.look2, 1, 'mipScale', 0, 1, 0.01);
   vec(fLook, params.look2, 2, 'dissolveFrequency', 0.2, 6, 0.05);
-  vec(fLook, params.look2, 3, 'fillFrequency', 0.2, 6, 0.05);
   vec(fLook, params.edge, 0, 'edgeSoftness', 0, 1, 0.01);
   vec(fLook, params.edge, 1, 'alphaDither', 0, 1, 0.01);
+  vec(fLook, params.patchFade, 0, 'patchFadeStart', 0, 1, 0.01);
+  vec(fLook, params.patchFade, 1, 'patchFade', 0, 1, 0.01);
+  vec(fLook, params.patchFade, 2, 'grazingFade', 0, 1, 0.01);
+  vec(fLook, params.leafShrink, 0, 'shrinkLeafVariation', 0, 1, 0.01);
+  vec(fLook, params.leafShrink, 1, 'shrinkSoftness', 0.01, 0.5, 0.01);
   vec(fLook, params.tone, 0, 'contrast', 0.2, 1.2, 0.01);
   vec(fLook, params.tone, 1, 'shadowFloor', 0, 1, 0.01);
   vec(fLook, params.tone, 2, 'aoStrength', 0, 1, 0.01);
@@ -214,10 +214,11 @@ function updateHud(focus) {
   const fmt = (x, d = 2) => x.toFixed(d);
   const rows = [
     `L ${fmt(e.level)}   crown radius ${fmt(focus.radiusPx, 0)}px   dist ${fmt(focus.distance, 0)}m`,
-    `shell  fill ${fmt(e.fill)}  flare ${fmt(e.flare)}  patches ${focus.visiblePatches}/${asset.shell.patchCount}  grow ${fmt(e.grow)}`,
-    e.crownActive
-      ? `crown  level ${e.crownLevel}  morph ${fmt(e.crownMorph)}  dissolve ${fmt(e.dissolve)}`
-      : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}  scale ${fmt(e.coreScale, 3)}  merge ${fmt(e.merge)}  dissolve ${fmt(e.dissolve)}`,
+    e.shellActive
+      ? `shell  near ${fmt(e.near)}  patches ${asset.shell.patchCount}  cutoff ${fmt(e.cutoff)}`
+      : e.crownActive
+        ? `crown  level ${e.crownLevel}  morph ${fmt(e.crownMorph)}  dissolve ${fmt(e.dissolve)}`
+        : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}  merge ${fmt(e.merge)}  dissolve ${fmt(e.dissolve)}`,
     `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
   ];
   hud.textContent = rows.join('\n');

@@ -90,19 +90,16 @@ export class TreeInstance {
     const e = evaluateLod(Math.max(level, 0), lodSettings);
     this.lod = e;
 
-    state.lodA.set(e.flare, e.keepThreshold, e.grow, lodSettings.pruneFade);
-    state.lodB.set(e.coreScale, e.coreLevel, e.coreMorph, e.merge);
-    state.lodC.set(e.crownLevel, e.crownMorph, e.fill, 0);
-    state.lodD.set(e.cutoff, e.dissolve, e.coreRadialAo, e.flare);
+    state.lodA.set(e.near, 0, 0, 0);
+    state.lodB.set(1, e.coreLevel, e.coreMorph, e.merge);
+    state.lodC.set(e.crownLevel, e.crownMorph, e.merge, 0);
+    state.lodD.set(e.cutoff, e.dissolve, 0, 0);
     state.wood.set(1, e.limbScale, e.twigScale, 0);
 
-    const { patchCount, indicesPerPatch } = asset.shell;
-    this.visiblePatches = Math.max(0, Math.min(patchCount, Math.ceil(e.keepThreshold * patchCount - 0.5)));
-    this.shell.visible = this.visiblePatches > 0;
-    this.shell.geometry.setDrawRange(0, this.visiblePatches * indicesPerPatch);
+    this.shell.visible = e.shellActive;
 
     const coreRange = asset.core.ranges[e.coreLevel];
-    this.core.visible = !e.crownActive && (e.fill > 0 || e.merge > 0);
+    this.core.visible = !e.shellActive && !e.crownActive;
     this.core.geometry.setDrawRange(coreRange.start, coreRange.count);
 
     const crownRange = asset.crown.ranges[e.crownLevel];

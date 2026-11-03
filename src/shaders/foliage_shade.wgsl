@@ -1,7 +1,7 @@
 fn foliageShade(
   nProxy: vec3f, nDetail: vec4f, shadeIn: vec4f,
   posLocal: vec3f, camLocal: vec3f, sun: vec4f, sunVis: f32,
-  leaf: vec4f, misc: vec4f, noisePos: vec3f, solidFill: f32, bulkCenter: vec3f, pixel: vec2f,
+  leaf: vec4f, misc: vec4f, noisePos: vec3f, bulkCenter: vec3f, pixel: vec2f,
   cLit: vec3f, cMid: vec3f, cShadow: vec3f, cDeep: vec3f, cTrans: vec3f, cSky: vec3f,
   ramp: vec4f, look: vec4f, look2: vec4f, edge: vec4f, tone: vec4f, fog: vec4f, cHorizon: vec3f, cSunHaze: vec3f, tint: vec4f
 ) -> vec4f {
@@ -26,7 +26,6 @@ fn foliageShade(
   let hueVariation = look.z;
   let skyAmbient = look.w;
   let dissolveFrequency = look2.z;
-  let fillFrequency = look2.w;
   let edgeSoftness = edge.x;
   let alphaDither = edge.y;
   let contrast = tone.x;
@@ -48,10 +47,7 @@ fn foliageShade(
   let silhouette = 1.0 - dissolve * (0.12 + 0.55 * edgeNoise);
   let silhouetteWidth = max(max(fwidth(silhouetteRim), edgeSoftness * 0.2), 0.0001);
   let solidAlpha = clamp((silhouette - silhouetteRim) / silhouetteWidth + 0.5, 0.0, 1.0);
-  let fillNoise = smoothstep(0.2, 0.8, st_fbm3(noisePos * fillFrequency + vec3f(clusterIndex * 7.31)));
-  let fillWidth = max(max(fwidth(fillNoise), edgeSoftness * 0.3), 0.0001);
-  let fillAlpha = clamp((mix(-0.05, 1.05, solidFill) - fillNoise) / fillWidth + 0.5, 0.0, 1.0);
-  var alpha = select(leafAlpha, min(solidAlpha, fillAlpha), isSolid);
+  var alpha = select(leafAlpha, min(leafAlpha, solidAlpha), isSolid);
   // Alpha-to-coverage maps equal alpha to the same sample mask, so overlapping layers would not
   // accumulate; per-pixel jitter decorrelates them. Fully opaque/clear pixels are left untouched.
   let jitter = st_hash21(floor(pixel) + vec2f(patchRand * 251.0, clusterIndex * 37.0)) - 0.5;

@@ -1,11 +1,11 @@
 import * as THREE from 'three/webgpu';
-import { Rng, clamp, fibonacciSphere } from '../math.js';
+import { Rng } from '../math.js';
 import { clusterNormal, clusterSurfacePoint } from './clusterShape.js';
 import { CrownField } from './crownField.js';
 import { buildIcosphere } from './icosphere.js';
 
 export const defaultShellParams = {
-  patchesPerCluster: 30,
+  patchDivisions: 1,
   overlap: 2.2,
   flare: 0.16,
   depth: 0.35,
@@ -15,9 +15,6 @@ export const defaultShellParams = {
 
 export const CORE_MAX_LEVEL = 2;
 export const CROWN_MAX_LEVEL = 2;
-const UV_EXTENT = 0.7;
-const UP = new THREE.Vector3(0, 1, 0);
-const RIGHT = new THREE.Vector3(1, 0, 0);
 
 class AttributeWriter {
   constructor(count, layout) {
@@ -69,8 +66,9 @@ export function disposeTreeAsset(asset) {
 }
 
 // Rows: 0 = center + shadow radius (0 casts no shadow), 1 = wood chain points, 2 = axes,
-// 3 = lobe base + sharpness, 4.. = one lobe (direction, weight) per row.
+// 3 = lobe base, lobe sharpness, leaf atlas yaw, leaf atlas cell, 4.. = one lobe (direction, weight) per row.
 function buildSphereTexture(tree) {
+  const rng = new Rng(tree.seed * 13 + 5);
   const width = Math.max(tree.clusters.length, tree.woodChains.length, 1);
   const lobeCount = tree.clusters[0].shape.lobes.length;
   const height = 4 + lobeCount;
@@ -80,7 +78,7 @@ function buildSphereTexture(tree) {
     const shadowRadius = c.isFiller ? 0 : Math.cbrt(c.axes.x * c.axes.y * c.axes.z) * 0.95;
     put(0, i, [c.center.x, c.center.y, c.center.z, shadowRadius]);
     put(2, i, [c.axes.x, c.axes.y, c.axes.z, 0]);
-    put(3, i, [c.shape.base, c.shape.sharpness, 0, 0]);
+    put(3, i, [c.shape.base, c.shape.sharpness, rng.next() * Math.PI * 2, Math.floor(rng.next() * 4)]);
     c.shape.lobes.forEach(({ dir, weight }, k) => put(4 + k, i, [dir.x, dir.y, dir.z, weight]));
   });
   tree.woodChains.forEach((s, i) => put(1, i, [s.center.x, s.center.y, s.center.z, s.radius]));
@@ -154,113 +152,134 @@ function buildCrown(field) {
   return { geometry: w.toGeometry(indices), ranges };
 }
 
+// Rhombic triacontahedron: one rhombus per icosahedron edge, spanning its two endpoints and the
+// centers of the two faces sharing it. Corners are counter-clockwise seen from outside.
+function triacontahedronRhombi() {
+  const ico = buildIcosphere(0);
+  const faces = ico.levels[0];
+  const centers = [];
+  const edgeFaces = new Map();
+  for (let f = 0; f < faces.length / 3; f++) {
+    const [a, b, c] = faces.slice(f * 3, f * 3 + 3);
+    centers.push(ico.dirs[a].clone().add(ico.dirs[b]).add(ico.dirs[c]).normalize());
+    for (const [p, q] of [[a, b], [b, c], [c, a]]) {
+      const key = Math.min(p, q) * 100 + Math.max(p, q);
+      if (!edgeFaces.has(key)) edgeFaces.set(key, { p, q, faces: [] });
+      edgeFaces.get(key).faces.push(f);
+    }
+  }
+  return [...edgeFaces.values()].map(({ p, q, faces: [f1, f2] }) => {
+    const a = ico.dirs[p];
+    const b = ico.dirs[q];
+    let c1 = centers[f1];
+    let c2 = centers[f2];
+    const normal = c1.clone().sub(a).cross(c2.clone().sub(a));
+    if (normal.dot(a.clone().add(b)) < 0) [c1, c2] = [c2, c1];
+    return [a, c1, b, c2];
+  });
+}
+
+function rhombusPoint([c00, c10, c11, c01], u, v) {
+  return c00.clone().multiplyScalar((1 - u) * (1 - v))
+    .addScaledVector(c10, u * (1 - v))
+    .addScaledVector(c11, u * v)
+    .addScaledVector(c01, (1 - u) * v)
+    .normalize();
+}
+
+// At rest (near offset 0) the patches tile each cluster surface exactly, edge to edge, and every
+// fragment looks up the leaf atlas from its own surface direction, so the tiled shell and the
+// core mesh show the same leaves. Up close each patch is scaled up around its center (overlap),
+// pushed inward (depth) and curled outward (flare); its leaves stay attached to it.
 function buildShell(tree, field, params) {
   const rng = new Rng(tree.seed * 7 + 3);
-  const leafClusters = tree.clusters.slice(0, tree.leafClusterCount);
-  const meanRadius = leafClusters.reduce((s, c) => s + c.radius, 0) / leafClusters.length;
-  const patches = [];
-  leafClusters.forEach((cluster, ci) => {
-    const count = clamp(Math.round(params.patchesPerCluster * (cluster.radius / meanRadius) ** 2), 8, 96);
-    const angle = Math.min(Math.acos(clamp(1 - (2 * params.overlap) / count, -1, 1)), 1.2);
-    const rotation = new THREE.Quaternion().setFromAxisAngle(rng.unitVector(), rng.next() * Math.PI * 2);
-    for (const d of fibonacciSphere(count)) {
-      d.applyQuaternion(rotation).addScaledVector(rng.unitVector(), angle * 0.25).normalize();
-      patches.push({
-        ci,
-        cluster,
-        dir: d,
-        angle: angle * rng.range(0.85, 1.15),
-        lift: rng.range(0, 0.06),
-        depth: rng.next(),
-        flare: params.flare * rng.range(0.7, 1.3),
-        uvRotation: rng.next() * Math.PI * 2,
-        cell: Math.floor(rng.next() * 4),
-        mirror: rng.next() < 0.5,
-        rand: rng.next(),
-      });
-    }
-  });
-  // Index order == rank order, so pruning N patches is just a shorter draw range.
-  rng.shuffle(patches);
-
+  const rhombi = triacontahedronRhombi();
+  const n = params.patchDivisions;
   const segments = params.gridSegments;
   const side = segments + 1;
   const perPatch = side * side;
-  const w = new AttributeWriter(patches.length * perPatch, {
-    position: 3, nearOffset: 3, patchCenter: 3, leafUv: 4, patchData: 4, shadeNear: 4, nPatch: 3,
+  const leafClusters = tree.clusters.slice(0, tree.leafClusterCount);
+  const patchCount = leafClusters.length * rhombi.length * n * n;
+  const w = new AttributeWriter(patchCount * perPatch, {
+    position: 3, nearOffset: 3, patchCenter: 3, patchUv: 2, patchData: 4, nPatchAo: 4,
   });
   const indices = [];
-  let maxFlare = 0;
-  patches.forEach((patch, pi) => {
-    const { cluster, dir } = patch;
-    const rank = (pi + 0.5) / patches.length;
-    const t1 = new THREE.Vector3().crossVectors(dir, Math.abs(dir.y) < 0.9 ? UP : RIGHT).normalize();
-    const t2 = new THREE.Vector3().crossVectors(dir, t1);
-    const tanA = Math.tan(patch.angle);
-    const shellRadius = 1 + patch.lift;
-    const nearScale = 1 - params.depth * patch.depth;
-    const center = clusterSurfacePoint(cluster, dir, shellRadius * nearScale);
-    const cos = Math.cos(patch.uvRotation);
-    const sin = Math.sin(patch.uvRotation);
-    const cellU = patch.cell % 2;
-    const cellV = Math.floor(patch.cell / 2);
-    const flared = [];
-    const proxies = [];
-    const v0 = pi * perPatch;
+  let maxOffset = 0;
+  let pi = 0;
+  const scale = Math.sqrt(Math.max(params.overlap, 1));
 
-    for (let iv = 0; iv < side; iv++) {
-      for (let iu = 0; iu < side; iu++) {
-        const index = v0 + iv * side + iu;
-        const u = -1 + (2 * iu) / segments;
-        const v = -1 + (2 * iv) / segments;
-        const d = dir.clone().addScaledVector(t1, u * tanA).addScaledVector(t2, v * tanA).normalize();
-        const base = clusterSurfacePoint(cluster, d, shellRadius);
-        const nProxy = clusterNormal(cluster, base);
-        const s = Math.hypot(u, v);
-        const near = base.clone().sub(cluster.center).multiplyScalar(nearScale).add(cluster.center)
-          .addScaledVector(nProxy, patch.flare * cluster.radius * nearScale * s * s);
-        const nearOffset = near.clone().sub(base);
-        maxFlare = Math.max(maxFlare, nearOffset.length());
-        flared.push(near);
-        proxies.push(nProxy);
+  leafClusters.forEach((cluster, ci) => {
+    const rotation = new THREE.Quaternion().setFromAxisAngle(rng.unitVector(), rng.next() * Math.PI * 2);
+    const corners = rhombi.map((r) => r.map((d) => d.clone().applyQuaternion(rotation)));
+    for (const rhombus of corners) {
+      for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+          const depth = rng.next();
+          const nearScale = 1 - params.depth * depth;
+          const grow = scale * rng.range(0.9, 1.1);
+          const flare = params.flare * rng.range(0.7, 1.3);
+          const rand = rng.next();
+          const center = clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + 0.5) / n, (j + 0.5) / n));
+          const nearCenter = center.clone().sub(cluster.center).multiplyScalar(nearScale).add(cluster.center);
+          const near = [];
+          const normals = [];
+          const v0 = pi * perPatch;
 
-        let ru = u * cos - v * sin;
-        const rv = u * sin + v * cos;
-        if (patch.mirror) ru = -ru;
-        const ao = field.occlusion(base.clone().addScaledVector(nProxy, 0.03), nProxy, patch.ci);
-        w.setVector('position', index, base);
-        w.setVector('nearOffset', index, nearOffset);
-        w.setVector('patchCenter', index, center);
-        w.set('leafUv', index, (cellU + 0.5 + 0.5 * UV_EXTENT * ru) / 2, (cellV + 0.5 + 0.5 * UV_EXTENT * rv) / 2, patch.depth, 0);
-        w.set('patchData', index, rank, patch.rand, Math.min(s, 1), patch.ci);
-        w.setVector('shadeNear', index, nProxy, ao);
-      }
-    }
+          for (let iv = 0; iv < side; iv++) {
+            for (let iu = 0; iu < side; iu++) {
+              const index = v0 + iv * side + iu;
+              const su = iu / segments;
+              const sv = iv / segments;
+              const far = clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + su) / n, (j + sv) / n));
+              const nProxy = clusterNormal(cluster, far);
+              const s = 2 * su - 1;
+              const t = 2 * sv - 1;
+              const p = far.clone().sub(center).multiplyScalar(grow).add(center)
+                .sub(cluster.center).multiplyScalar(nearScale).add(cluster.center)
+                .addScaledVector(nProxy, flare * cluster.radius * nearScale * (s * s + t * t) * 0.5);
+              const offset = p.clone().sub(far);
+              maxOffset = Math.max(maxOffset, offset.length());
+              near.push(p);
+              normals.push(nProxy);
+              const ao = field.occlusion(far.clone().addScaledVector(nProxy, 0.03), nProxy, ci);
+              w.setVector('position', index, far);
+              w.setVector('nearOffset', index, offset);
+              w.setVector('patchCenter', index, nearCenter);
+              w.set('patchUv', index, su, sv);
+              w.set('patchData', index, depth, rand, 1 - 16 * su * (1 - su) * sv * (1 - sv), ci);
+              w.set('nPatchAo', index, 0, 0, 0, ao);
+            }
+          }
 
-    for (let iv = 0; iv < side; iv++) {
-      for (let iu = 0; iu < side; iu++) {
-        const at = (x, y) => flared[clamp(y, 0, segments) * side + clamp(x, 0, segments)];
-        const du = at(iu + 1, iv).clone().sub(at(iu - 1, iv));
-        const dv = at(iu, iv + 1).clone().sub(at(iu, iv - 1));
-        const n = du.cross(dv).normalize();
-        if (n.dot(proxies[iv * side + iu]) < 0) n.negate();
-        w.setVector('nPatch', v0 + iv * side + iu, n);
-      }
-    }
+          for (let iv = 0; iv < side; iv++) {
+            for (let iu = 0; iu < side; iu++) {
+              const at = (x, y) => near[Math.min(Math.max(y, 0), segments) * side + Math.min(Math.max(x, 0), segments)];
+              const du = at(iu + 1, iv).clone().sub(at(iu - 1, iv));
+              const dv = at(iu, iv + 1).clone().sub(at(iu, iv - 1));
+              const normal = du.cross(dv).normalize();
+              if (normal.dot(normals[iv * side + iu]) < 0) normal.negate();
+              const index = v0 + iv * side + iu;
+              w.attributes.nPatchAo.data.set([normal.x, normal.y, normal.z], index * 4);
+            }
+          }
 
-    for (let iv = 0; iv < segments; iv++) {
-      for (let iu = 0; iu < segments; iu++) {
-        const a = v0 + iv * side + iu;
-        const b = a + 1;
-        const c = a + side;
-        const d = c + 1;
-        indices.push(a, b, d, a, d, c);
+          for (let iv = 0; iv < segments; iv++) {
+            for (let iu = 0; iu < segments; iu++) {
+              const a = v0 + iv * side + iu;
+              const b = a + 1;
+              const c = a + side;
+              const d = c + 1;
+              indices.push(a, b, d, a, d, c);
+            }
+          }
+          pi++;
+        }
       }
     }
   });
   const geometry = w.toGeometry(indices);
-  geometry.boundingSphere.radius += maxFlare * 2;
-  return { geometry, patchCount: patches.length, indicesPerPatch: segments * segments * 6 };
+  geometry.boundingSphere.radius += maxOffset;
+  return { geometry, patchCount };
 }
 
 function buildWood(tree, field) {
