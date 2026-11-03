@@ -36,8 +36,12 @@ const shellParams = { ...defaultShellParams };
 const lodSettings = { ...defaultLodSettings };
 const env = { sunAzimuth: 140, sunElevation: 38, windStrength: 0.35, windDirection: 20, gust: 0.6, flutter: 0.04, fogDensity: 0.0012 };
 const view = { layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft', innerBall: true };
+// Leaves are packed close to the densest non-touching arrangement, so their count is set by their
+// size: about 840 per sphere at sizeScale 1, scaling with 1 / size².
+const atlasParams = { leafCount: 840 };
+const createShellAtlas = () => createLeafAtlas({ sizeScale: Math.sqrt(840 / atlasParams.leafCount) });
 const atlases = {
-  leaf: createLeafAtlas(),
+  leaf: createShellAtlas(),
   inner: createLeafAtlas({ seed: 23, cell: 512, leafLength: [0.13, 0.22] }),
 };
 
@@ -142,6 +146,11 @@ function buildGui() {
   fTree.add(shellParams, 'leafSizeCompensation').onFinishChange(rebuild);
   fTree.add(shellParams, 'gridSegments', 1, 8, 1).onFinishChange(rebuild);
   fTree.add(shellParams, 'crownSmooth', 0.05, 3, 0.05).onFinishChange(rebuild);
+  fTree.add(atlasParams, 'leafCount', 200, 3000, 10).name('atlasLeafCount').onFinishChange(() => {
+    atlases.leaf.dispose();
+    atlases.leaf = createShellAtlas();
+    rebuild();
+  });
 
   const fLook = gui.addFolder('Look').close();
   fLook.add(view, 'style', Object.keys(stylePresets)).onChange((name) => {
@@ -234,6 +243,7 @@ function updateHud(focus) {
         ? `crown  level ${e.crownLevel}  morph ${fmt(e.crownMorph)}  dissolve ${fmt(e.dissolve)}`
         : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}  merge ${fmt(e.merge)}  dissolve ${fmt(e.dissolve)}`,
     `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
+    `atlas  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,
   ];
   hud.textContent = rows.join('\n');
 }

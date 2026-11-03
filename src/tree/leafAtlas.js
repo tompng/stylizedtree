@@ -16,8 +16,9 @@ const DISC = 0.96;
 export function createLeafAtlas({
   seed = 11,
   cell = 1024,
-  candidates = 40000,
-  leafLength = [0.07, 0.12],
+  sizeScale = 1,
+  candidates = Math.round(40000 / sizeScale ** 2),
+  leafLength = [0.07 * sizeScale, 0.12 * sizeScale],
   leafAspect = [0.5, 0.7],
   gapPixels = 3,
 } = {}) {
@@ -43,6 +44,7 @@ export function createLeafAtlas({
   const R = (cell / 2) * DISC;
   // The projection never maps a radian to fewer than R / 2 pixels.
   const gap = gapPixels / (R / 2);
+  const leafCounts = [];
   for (let pattern = 0; pattern < 2; pattern++) {
     const pool = Array.from({ length: candidates }, () => {
       const theta = Math.acos(1 - 2 * rng.next());
@@ -58,6 +60,7 @@ export function createLeafAtlas({
       };
     });
     const leaves = placeApart(pool, { reach: leafLength[1], gap });
+    leafCounts.push(leaves.length);
 
     for (const sign of [1, -1]) {
       const cellIndex = 2 * pattern + (sign > 0 ? 0 : 1);
@@ -119,6 +122,7 @@ export function createLeafAtlas({
   texture.magFilter = THREE.LinearFilter;
   texture.anisotropy = 8;
   texture.needsUpdate = true;
+  texture.userData.leafCounts = leafCounts;
   return texture;
 }
 
