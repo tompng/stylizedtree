@@ -73,12 +73,13 @@ export function disposeTreeAsset(asset) {
 
 // Rows: 0 = center + shadow radius (0 casts no shadow), 1 = wood chain points, 2 = axes,
 // 3 = lobe base, lobe sharpness, leaf atlas pattern, -, 4 = leaf atlas rotation quaternion,
-// 5.. = one lobe (direction, weight) per row.
+// 5 = wind pivot (where the cluster's twig forks off its limb) + flexibility, 6.. = one lobe
+// (direction, weight) per row.
 function buildSphereTexture(tree) {
   const rng = new Rng(tree.seed * 13 + 5);
   const width = Math.max(tree.clusters.length, tree.woodChains.length, 1);
   const lobeCount = tree.clusters[0].shape.lobes.length;
-  const height = 5 + lobeCount;
+  const height = 6 + lobeCount;
   const data = new Float32Array(width * height * 4);
   const put = (row, column, values) => data.set(values, (width * row + column) * 4);
   tree.clusters.forEach((c, i) => {
@@ -87,7 +88,8 @@ function buildSphereTexture(tree) {
     put(2, i, [c.axes.x, c.axes.y, c.axes.z, 0]);
     put(3, i, [c.shape.base, c.shape.sharpness, rng.next() < 0.5 ? 0 : 1, 0]);
     put(4, i, randomQuaternion(rng));
-    c.shape.lobes.forEach(({ dir, weight }, k) => put(5 + k, i, [dir.x, dir.y, dir.z, weight]));
+    put(5, i, [c.pivot.x, c.pivot.y, c.pivot.z, c.isFiller ? 0 : 1]);
+    c.shape.lobes.forEach(({ dir, weight }, k) => put(6 + k, i, [dir.x, dir.y, dir.z, weight]));
   });
   tree.woodChains.forEach((s, i) => put(1, i, [s.center.x, s.center.y, s.center.z, s.radius]));
   const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
@@ -256,7 +258,7 @@ function buildShell(tree, field, params) {
   const leafClusters = tree.clusters.slice(0, tree.leafClusterCount);
   const patchCount = leafClusters.length * rhombi.length * n * n;
   const w = new AttributeWriter(patchCount * perPatch, {
-    position: 3, nearOffset: 3, patchCenter: 3, patchUv: 2, patchData: 4, nPatchAo: 4,
+    position: 3, nearOffset: 3, patchCenter: 4, patchUv: 2, patchData: 4, nPatchAo: 4,
   });
   const indices = [];
   let maxOffset = 0;
@@ -309,12 +311,14 @@ function buildShell(tree, field, params) {
               const ao = field.occlusion(far.clone().addScaledVector(nProxy, 0.03), nProxy, ci);
               w.setVector('position', index, far);
               w.setVector('nearOffset', index, offset);
-              w.setVector('patchCenter', index, nearCenter);
               w.set('patchUv', index, su, sv);
               w.set('patchData', index, depth, rand, 1 - 16 * su * (1 - su) * sv * (1 - sv), ci);
               w.set('nPatchAo', index, 0, 0, 0, ao);
             }
           }
+
+          const patchRadius = Math.max(...near.map((p) => p.distanceTo(nearCenter)));
+          for (let k = 0; k < perPatch; k++) w.setVector('patchCenter', v0 + k, nearCenter, patchRadius);
 
           for (let iv = 0; iv < side; iv++) {
             for (let iu = 0; iu < side; iu++) {
@@ -372,7 +376,7 @@ function buildWood(tree, field) {
         bucket.positions.push(pos.x, pos.y, pos.z);
         bucket.normals.push(n.x, n.y, n.z);
         bucket.axes.push(p.x, p.y, p.z);
-        bucket.data.push(branch.level, ao, 0, 0);
+        bucket.data.push(branch.level, ao, branch.clusterIndex ?? -1, t);
       }
     }
     for (let i = 1; i <= lengthSegments; i++) {

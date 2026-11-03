@@ -64,10 +64,63 @@ fn st_windOffset(anchor: vec3f, wind: vec4f, tree: vec4f) -> vec3f {
   return offset;
 }
 
-fn st_clusterWobble(seed: f32, wind: vec4f, tree: vec4f) -> vec3f {
-  let time = wind.w;
-  let w = vec3f(sin(time * 1.9 + seed * 37.0), 0.5 * sin(time * 2.4 + seed * 53.0), sin(time * 1.6 + seed * 71.0));
-  return w * (0.05 * length(wind.xyz) * (0.4 + tree.z));
+// Rotation by rotation vector w (axis * angle), Rodrigues' formula.
+fn st_rotateVector(v: vec3f, w: vec3f) -> vec3f {
+  let angle = length(w);
+  if (angle < 0.000001) {
+    return v;
+  }
+  let k = w / angle;
+  let c = cos(angle);
+  return v * c + cross(k, v) * sin(angle) + k * dot(k, v) * (1.0 - c);
+}
+
+// Local gust strength: a steady part plus the instance's gust level (tree.z) carried by a noise
+// pattern that travels downwind, so gusts sweep through the crown instead of moving it as one.
+fn st_windGust(p: vec3f, wind: vec4f, tree: vec4f) -> f32 {
+  let strength = length(wind.xyz);
+  let dir = wind.xyz / max(strength, 0.0001);
+  let side = vec3f(-dir.z, 0.0, dir.x);
+  let n = st_noise2(vec2f(dot(p, dir) * 0.35 - wind.w * 1.2 + tree.y, dot(p, side) * 0.25));
+  return 0.4 + tree.z * (0.4 + 1.2 * n);
+}
+
+// Rotation vector of cluster ci bending on its twig, about the pivot in sphere texture row 5 (where
+// the twig forks off its limb; w = flexibility, 0 for the filler). The twig turns toward the wind in
+// proportion to how far it is from pointing along it.
+fn st_clusterBend(ci: i32, spheres: texture_2d<f32>, wind: vec4f, tree: vec4f, windBend: vec4f) -> vec3f {
+  let bendAmount = windBend.x;
+  let center = textureLoad(spheres, vec2i(ci, 0), 0).xyz;
+  let pivot = textureLoad(spheres, vec2i(ci, 5), 0);
+  let strength = length(wind.xyz);
+  let dir = wind.xyz / max(strength, 0.0001);
+  let twig = normalize(center - pivot.xyz + vec3f(0.0, 0.0001, 0.0));
+  let sway = 0.15 * sin(wind.w * 1.9 + f32(ci) * 37.0);
+  return cross(twig, dir) * (bendAmount * strength * pivot.w * (st_windGust(center, wind, tree) + sway));
+}
+
+// Offset of rest point p of cluster ci: the bend (rotation about the pivot), a lean that carries
+// the cluster's far end (along the twig) further downwind, a press that flattens its windward side,
+// and a ripple of the local gust through it. `amount` scales it all.
+fn st_clusterDeform(p: vec3f, ci: i32, spheres: texture_2d<f32>, wind: vec4f, tree: vec4f, windBend: vec4f, bend: vec3f, amount: f32) -> vec3f {
+  let lean = windBend.y;
+  let press = windBend.z;
+  let ripple = windBend.w;
+  let centerRow = textureLoad(spheres, vec2i(ci, 0), 0);
+  let center = centerRow.xyz;
+  let radius = centerRow.w;
+  let pivot = textureLoad(spheres, vec2i(ci, 5), 0);
+  let strength = length(wind.xyz);
+  let dir = wind.xyz / max(strength, 0.0001);
+  let twig = normalize(center - pivot.xyz + vec3f(0.0, 0.0001, 0.0));
+  let gustCenter = st_windGust(center, wind, tree);
+  let gustHere = st_windGust(p, wind, tree);
+  let q = p - center;
+  let push = dir * (strength * pivot.w * (
+    lean * gustCenter * dot(q, twig)
+    + press * gustHere * max(-dot(q, dir), 0.0)
+    + ripple * (gustHere - gustCenter) * radius));
+  return (st_rotateVector(p - pivot.xyz, bend * amount) + pivot.xyz - p) + push * amount;
 }
 
 fn st_sunVisibility(p: vec3f, sunDir: vec3f, spheres: texture_2d<f32>, row: i32, count: i32, density: f32, softness: f32) -> f32 {
@@ -116,7 +169,7 @@ fn st_clusterSdf(p: vec3f, ci: i32, spheres: texture_2d<f32>, lobeCount: i32) ->
   let n = q / len;
   var s = shape.x;
   for (var k = 0; k < lobeCount; k = k + 1) {
-    let lobe = textureLoad(spheres, vec2i(ci, 5 + k), 0);
+    let lobe = textureLoad(spheres, vec2i(ci, 6 + k), 0);
     s = s + lobe.w * exp(shape.y * (dot(n, lobe.xyz) - 1.0));
   }
   let g = max(length(q / a), 0.000001);
@@ -133,7 +186,7 @@ fn st_clusterNormal(p: vec3f, ci: i32, spheres: texture_2d<f32>, lobeCount: i32)
   var s = shape.x;
   var ds = vec3f(0.0);
   for (var k = 0; k < lobeCount; k = k + 1) {
-    let lobe = textureLoad(spheres, vec2i(ci, 5 + k), 0);
+    let lobe = textureLoad(spheres, vec2i(ci, 6 + k), 0);
     let d = dot(n, lobe.xyz);
     let e = lobe.w * exp(shape.y * (d - 1.0));
     s = s + e;

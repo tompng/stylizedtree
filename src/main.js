@@ -203,6 +203,11 @@ function buildGui() {
   fEnv.add(env, 'windDirection', 0, 360, 1);
   fEnv.add(env, 'gust', 0, 2, 0.01);
   fEnv.add(env, 'flutter', 0, 0.2, 0.005);
+  vec(fEnv, params.windBend, 0, 'bend', 0, 1.5, 0.01);
+  vec(fEnv, params.windBend, 1, 'lean', 0, 1, 0.01);
+  vec(fEnv, params.windBend, 2, 'press', 0, 1, 0.01);
+  vec(fEnv, params.windBend, 3, 'ripple', 0, 1, 0.01);
+  vec(fEnv, params.windPatch, 0, 'patchTilt', 0, 1.5, 0.01);
   fEnv.add(env, 'fogDensity', 0, 0.006, 0.0001);
 }
 

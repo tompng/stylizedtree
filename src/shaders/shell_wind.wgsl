@@ -1,11 +1,7 @@
-fn shellWind(patchCenter: vec3f, patchData: vec4f, spheres: texture_2d<f32>, wind: vec4f, tree: vec4f) -> vec3f {
-  let patchRand = patchData.y;
-  let edge = patchData.z;
-  let clusterIndex = patchData.w;
-  let flutterAmount = tree.w;
-
-  let center = textureLoad(spheres, vec2i(i32(clusterIndex + 0.5), 0), 0).xyz;
-  let outward = normalize(patchCenter - center);
-  let flutter = sin(wind.w * 5.3 + patchRand * 61.0 + edge * 2.0) * flutterAmount * edge * length(wind.xyz);
-  return outward * flutter + st_windOffset(center, wind, tree) + st_clusterWobble(clusterIndex, wind, tree);
+fn shellWind(rest: vec3f, patchCenter: vec4f, patchData: vec4f, spheres: texture_2d<f32>, wind: vec4f, tree: vec4f, windBend: vec4f, bend: vec3f, tilt: vec3f) -> vec3f {
+  let ci = i32(patchData.w + 0.5);
+  let center = textureLoad(spheres, vec2i(ci, 0), 0).xyz;
+  let pc = patchCenter.xyz;
+  let patchOffset = st_rotateVector(rest - pc, tilt) + pc - rest;
+  return st_windOffset(center, wind, tree) + st_clusterDeform(rest, ci, spheres, wind, tree, windBend, bend, 1.0) + patchOffset;
 }

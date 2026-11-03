@@ -28,6 +28,7 @@ export function generateTree(params) {
     shape: flatShape(params),
     isFiller: true,
   };
+  filler.pivot = filler.center.clone();
   filler.radius = Math.cbrt(filler.axes.x * filler.axes.y * filler.axes.z);
   const branches = growBranches(rng, params, crownCenter, leafClusters);
   return {
@@ -131,10 +132,12 @@ function growBranches(rng, params, crownCenter, clusters) {
     for (const cluster of group) {
       const forkT = rng.range(0.55, 0.8);
       const fork = limb.curve.getPointAt(forkT);
+      cluster.pivot = fork.clone();
       const baseRadius = Math.min(twigRadius, limb.radius(forkT) * 0.85);
       const twigMid = fork.clone().lerp(cluster.center, 0.5).add(new Vector3(rng.signed() * 0.25, rng.signed() * 0.25, rng.signed() * 0.25));
       branches.push({
         level: 2,
+        clusterIndex: clusters.indexOf(cluster),
         curve: new CatmullRomCurve3([fork, twigMid, cluster.center.clone()]),
         radius: (t) => baseRadius * (1 - 0.5 * t) * tipTaper(t, 0.4),
       });
