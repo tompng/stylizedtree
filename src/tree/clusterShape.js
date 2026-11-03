@@ -1,7 +1,6 @@
 import { Vector3 } from 'three/webgpu';
 
 // Cluster surface: |q / axes| = s(q̂), q = p - center, s(n) = base + Σ w·exp(κ(n·u - 1)).
-// Same field as st_clusterSdf / st_clusterNormal in common.wgsl.
 
 export function lobeMean(sharpness) {
   return (1 - Math.exp(-2 * sharpness)) / (2 * sharpness);
@@ -58,17 +57,4 @@ export function clusterRatio(cluster, x, y, z) {
   const len = Math.hypot(qx, qy, qz);
   if (len < 1e-9) return 0;
   return Math.hypot(qx / a.x, qy / a.y, qz / a.z) / lobeScale(cluster.shape, qx / len, qy / len, qz / len);
-}
-
-// Radial distance to the surface: exact for spheres, an overestimate on oblique slopes.
-export function clusterSdf(cluster, x, y, z) {
-  const { center: c, axes: a } = cluster;
-  const qx = x - c.x;
-  const qy = y - c.y;
-  const qz = z - c.z;
-  const len = Math.hypot(qx, qy, qz);
-  const g = Math.hypot(qx / a.x, qy / a.y, qz / a.z);
-  if (g < 1e-6) return -Math.min(a.x, a.y, a.z) * cluster.shape.base;
-  const s = lobeScale(cluster.shape, qx / len, qy / len, qz / len);
-  return (len * (g - s)) / g;
 }

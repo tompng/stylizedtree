@@ -7,7 +7,6 @@ const TINTS = {
   shell: [0.95, 0.35, 0.3],
   core: [0.3, 0.85, 0.35],
   inner: [0.95, 0.8, 0.25],
-  crown: [0.3, 0.45, 0.95],
   wood: [0, 0, 0],
 };
 
@@ -20,6 +19,14 @@ function shareGeometry(source) {
   geometry.setIndex(source.index);
   geometry.boundingSphere = source.boundingSphere.clone();
   return geometry;
+}
+
+// Splits a 0..1 LOD progress evenly over `steps` geomorph steps, from the finest level `steps`
+// down to level 0, which is reached with no morph left at progress 1.
+function steppedLevel(progress, steps) {
+  const x = progress * steps;
+  const step = Math.min(Math.floor(x), steps);
+  return { level: steps - step, morph: x - step };
 }
 
 const inverse = new THREE.Matrix4();
@@ -38,7 +45,6 @@ export class TreeInstance {
       tree: new THREE.Vector4(),
       lodA: new THREE.Vector4(),
       lodB: new THREE.Vector4(),
-      lodC: new THREE.Vector4(),
       lodD: new THREE.Vector4(),
       farLeaf: new THREE.Vector4(),
       wood: new THREE.Vector4(1, 1, 1, 0),
@@ -48,7 +54,6 @@ export class TreeInstance {
     this.shell = this.addMesh(shareGeometry(asset.shell.geometry), materials.shell, 'shell');
     this.core = this.addMesh(shareGeometry(asset.core.geometry), materials.core, 'core');
     this.inner = this.addMesh(shareGeometry(asset.inner.geometry), materials.inner, 'inner');
-    this.crown = this.addMesh(shareGeometry(asset.crown.geometry), materials.crown, 'crown');
     this.wood = this.addMesh(shareGeometry(asset.wood.geometry), materials.wood, 'wood');
     this.decal = this.addMesh(decalGeometry, materials.decal, 'wood');
     this.decal.frustumCulled = false;
@@ -68,7 +73,7 @@ export class TreeInstance {
   }
 
   dispose() {
-    for (const mesh of [this.shell, this.core, this.inner, this.crown, this.wood]) mesh.geometry.dispose();
+    for (const mesh of [this.shell, this.core, this.inner, this.wood]) mesh.geometry.dispose();
   }
 
   update({ camera, viewportHeight, lodSettings, sunWorld, wind, time, tintAmount, showInner, atlases }) {
@@ -93,20 +98,13 @@ export class TreeInstance {
     if (lodSettings.mode === 'auto') level = Math.log2(lodSettings.referencePixels / this.radiusPx) + lodSettings.bias;
     else if (lodSettings.mode === 'manual') level = lodSettings.manualLevel;
     const e = evaluateLod(Math.max(level, 0), lodSettings);
-    const steps = asset.shell.segments;
-    const step = Math.min(Math.floor(e.shellPoly * steps), steps - 1);
-    e.shellLevel = steps - step;
-    e.shellMorph = e.shellPoly * steps - step;
-    e.coreLevel = Math.min(e.coreLevel, asset.core.maxLevel);
-    const woodSteps = asset.wood.ranges.length - 1;
-    const woodStep = Math.min(Math.floor(e.woodPoly * woodSteps), woodSteps);
-    e.woodDetail = woodSteps - woodStep;
-    e.woodMorph = e.woodPoly * woodSteps - woodStep;
+    ({ level: e.shellLevel, morph: e.shellMorph } = steppedLevel(e.shellPoly, asset.shell.segments));
+    ({ level: e.coreLevel, morph: e.coreMorph } = steppedLevel(e.corePoly, asset.core.maxLevel));
+    ({ level: e.woodDetail, morph: e.woodMorph } = steppedLevel(e.woodPoly, asset.wood.ranges.length - 1));
     this.lod = e;
 
     state.lodA.set(e.near, e.shellLevel, e.shellMorph, 0);
-    state.lodB.set(1, e.coreLevel, e.coreMorph, e.merge);
-    state.lodC.set(e.crownLevel, e.crownMorph, e.merge, 0);
+    state.lodB.set(1, e.coreLevel, e.coreMorph, 0);
     state.lodD.set(e.cutoff, e.dissolve, e.innerFade, 0);
     state.farLeaf.set(farCoverageScale(atlases.leaf, e.cutoff), farCoverageScale(atlases.inner, e.cutoff), 0, 0);
     state.wood.set(1, e.limbScale, e.twigScale, 0);
@@ -117,20 +115,16 @@ export class TreeInstance {
     this.shell.geometry.setDrawRange(shellRange.start, shellRange.count);
 
     const coreRange = asset.core.ranges[e.coreLevel];
-    this.core.visible = !e.shellActive && !e.crownActive;
+    this.core.visible = !e.shellActive;
     this.core.geometry.setDrawRange(coreRange.start, coreRange.count);
 
     this.inner.visible = showInner && e.innerFade < 1;
-
-    const crownRange = asset.crown.ranges[e.crownLevel];
-    this.crown.visible = e.crownActive;
-    this.crown.geometry.setDrawRange(crownRange.start, crownRange.count);
 
     const woodLevel = e.twigScale > 0 ? 2 : e.limbScale > 0 ? 1 : 0;
     const woodRange = asset.wood.ranges[e.woodDetail];
     this.wood.geometry.setDrawRange(woodRange.start, woodRange.countUpTo[woodLevel]);
 
-    for (const mesh of [this.shell, this.core, this.inner, this.crown]) mesh.userData.tint.w = tintAmount;
+    for (const mesh of [this.shell, this.core, this.inner]) mesh.userData.tint.w = tintAmount;
     this.updateDecal();
   }
 

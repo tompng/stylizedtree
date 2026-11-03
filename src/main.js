@@ -118,7 +118,10 @@ function buildGui() {
   fLod.add(lodSettings, 'bias', -3, 3, 0.01);
   fLod.add(lodSettings, 'referencePixels', 100, 1000, 10);
   const fStages = fLod.addFolder('stage ranges (L)').close();
-  for (const key of ['collapseStart', 'collapseEnd', 'shellPolyStart', 'woodPolyStart', 'woodPolyEnd', 'corePolyStart', 'corePolyEnd', 'mergeStart', 'mergeEnd', 'crownPolyEnd']) {
+  for (const key of [
+    'collapseStart', 'collapseEnd', 'shellPolyStart', 'dissolveEnd', 'woodPolyStart', 'woodPolyEnd', 'corePolyStart', 'corePolyEnd',
+    'innerFadeStart', 'innerFadeEnd', 'twigFadeStart', 'twigFadeEnd', 'limbFadeStart', 'limbFadeEnd',
+  ]) {
     fStages.add(lodSettings, key, 0, 10, 0.05);
   }
   const fStageParams = fLod.addFolder('stage params').close();
@@ -145,7 +148,6 @@ function buildGui() {
   fTree.add(shellParams, 'depth', 0, 0.8, 0.01).onFinishChange(rebuild);
   fTree.add(shellParams, 'leafSizeCompensation').onFinishChange(rebuild);
   fTree.add(shellParams, 'gridSegments', 1, 8, 1).onFinishChange(rebuild);
-  fTree.add(shellParams, 'crownSmooth', 0.05, 3, 0.05).onFinishChange(rebuild);
   fTree.add(atlasParams, 'leafCount', 200, 3000, 10).name('atlasLeafCount').onFinishChange(() => {
     atlases.leaf.dispose();
     atlases.leaf = createShellAtlas();
@@ -239,9 +241,7 @@ function updateHud(focus) {
     `L ${fmt(e.level)}   crown radius ${fmt(focus.radiusPx, 0)}px   dist ${fmt(focus.distance, 0)}m`,
     e.shellActive
       ? `shell  near ${fmt(e.near)}  grid ${e.shellLevel}  morph ${fmt(e.shellMorph)}  patches ${asset.shell.patchCount}  cutoff ${fmt(e.cutoff)}`
-      : e.crownActive
-        ? `crown  level ${e.crownLevel}  morph ${fmt(e.crownMorph)}  dissolve ${fmt(e.dissolve)}`
-        : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}  merge ${fmt(e.merge)}  dissolve ${fmt(e.dissolve)}`,
+      : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}  dissolve ${fmt(e.dissolve)}`,
     `wood   detail ${e.woodDetail}  morph ${fmt(e.woodMorph)}`,
     `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
     `atlas  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,

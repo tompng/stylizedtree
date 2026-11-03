@@ -21,23 +21,14 @@ export function generateTree(params) {
   const rng = new Rng(params.seed);
   const crownRadii = new Vector3(params.crownWidth / 2, params.crownHeight / 2, params.crownWidth / 2);
   const crownCenter = new Vector3(0, params.height - crownRadii.y, 0);
-  const leafClusters = placeClusters(rng, params, crownCenter, crownRadii);
-  const filler = {
-    center: crownCenter.clone().add(new Vector3(0, -0.1 * crownRadii.y, 0)),
-    axes: new Vector3(crownRadii.x * 0.62, crownRadii.y * 0.52, crownRadii.z * 0.62),
-    shape: flatShape(params),
-    isFiller: true,
-  };
-  filler.pivot = filler.center.clone();
-  filler.radius = Math.cbrt(filler.axes.x * filler.axes.y * filler.axes.z);
-  const branches = growBranches(rng, params, crownCenter, leafClusters);
+  const clusters = placeClusters(rng, params, crownCenter, crownRadii);
+  const branches = growBranches(rng, params, crownCenter, clusters);
   return {
     seed: params.seed,
     height: params.height,
     crownCenter,
     crownRadii,
-    clusters: [...leafClusters, filler],
-    leafClusterCount: leafClusters.length,
+    clusters,
     branches,
     woodChains: sampleWoodChains(branches),
   };
@@ -63,14 +54,9 @@ function placeClusters(rng, params, crownCenter, crownRadii) {
       dir.y * (crownRadii.y - axes.y),
       dir.z * (crownRadii.z - axes.z),
     ).multiplyScalar(reach).add(crownCenter);
-    clusters.push({ center, axes, radius, shape: lobedShape(rng, params, dir), isFiller: false });
+    clusters.push({ center, axes, radius, shape: lobedShape(rng, params, dir) });
   }
   return clusters;
-}
-
-function flatShape(params) {
-  const lobes = Array.from({ length: params.clusterLobes }, () => ({ dir: new Vector3(0, 1, 0), weight: 0 }));
-  return { base: 1, sharpness: params.lobeSharpness, lobes };
 }
 
 function lobedShape(rng, params, outward) {

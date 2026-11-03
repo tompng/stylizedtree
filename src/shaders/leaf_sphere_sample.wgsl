@@ -8,7 +8,7 @@ fn leafSphereSample(tex: texture_2d<f32>, samp: sampler, p: vec3f, clusterIndex:
   let ci = i32(clusterIndex + 0.5);
   let c = textureLoad(spheres, vec2i(ci, 0), 0).xyz;
   let a = textureLoad(spheres, vec2i(ci, 2), 0).xyz;
-  let pattern = textureLoad(spheres, vec2i(ci, 3), 0).z;
+  let pattern = textureLoad(spheres, vec2i(ci, 3), 0).x;
   let q = textureLoad(spheres, vec2i(ci, 4), 0);
 
   let d0 = normalize((p - c) / a);

@@ -36,14 +36,11 @@ export function rhombusPoint([c00, c10, c11, c01], u, v) {
     .normalize();
 }
 
-// Core mesh triangles of one rhombus, as indices into RHOMBUS_POINTS (the four corners, then the
-// center). Level 0 splits the rhombus along its c00-c11 diagonal; level 1 splits it into four
-// around its center, which exists only when the shell's patch grid has a vertex there.
+// Triangles of one rhombus, as indices into RHOMBUS_POINTS (the four corners, then the center):
+// split along the c00-c11 diagonal (an icosahedron edge), or into four around the center.
 export const RHOMBUS_POINTS = [[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0.5]];
-export const RHOMBUS_TRIANGLES = [
-  [[0, 1, 2], [0, 2, 3]],
-  [[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]],
-];
+export const RHOMBUS_HALVES = [[0, 1, 2], [0, 2, 3]];
+export const RHOMBUS_QUARTERS = [[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]];
 
 // Value at (u, v) of the piecewise-linear function given by `values` at `points` over `triangles`.
 // Values are numbers or objects with clone / multiplyScalar / addScaledVector (THREE vectors).

@@ -3,8 +3,7 @@ import { attribute, float, mix, screenCoordinate, texture, uniform, varying, vec
 import clusterBendSrc from '../shaders/cluster_bend.wgsl?raw';
 import clusterDeformSrc from '../shaders/cluster_deform.wgsl?raw';
 import commonSrc from '../shaders/common.wgsl?raw';
-import corePositionSrc from '../shaders/core_position.wgsl?raw';
-import crownPositionSrc from '../shaders/crown_position.wgsl?raw';
+import coreMorphSrc from '../shaders/core_morph.wgsl?raw';
 import decalPositionSrc from '../shaders/decal_position.wgsl?raw';
 import decalShadeSrc from '../shaders/decal_shade.wgsl?raw';
 import foliageShadeSrc from '../shaders/foliage_shade.wgsl?raw';
@@ -14,8 +13,8 @@ import leafSphereSampleSrc from '../shaders/leaf_sphere_sample.wgsl?raw';
 import patchTiltSrc from '../shaders/patch_tilt.wgsl?raw';
 import rotateVectorSrc from '../shaders/rotate_vector.wgsl?raw';
 import shellFadeSrc from '../shaders/shell_fade.wgsl?raw';
-import proxyNormalSrc from '../shaders/proxy_normal.wgsl?raw';
 import shellFarSrc from '../shaders/shell_far.wgsl?raw';
+import shellMorphSrc from '../shaders/shell_morph.wgsl?raw';
 import shellNormalSrc from '../shaders/shell_normal.wgsl?raw';
 import shellPositionSrc from '../shaders/shell_position.wgsl?raw';
 import shellUvSrc from '../shaders/shell_uv.wgsl?raw';
@@ -34,9 +33,9 @@ const shellRestPosition = fn(shellPositionSrc);
 const shellFarPosition = fn(shellFarSrc);
 const shellNormalAo = fn(shellNormalSrc);
 const shellPatchUv = fn(shellUvSrc);
+const shellMorphFactor = fn(shellMorphSrc);
 const shellWind = fn(shellWindSrc);
-const coreRestPosition = fn(corePositionSrc);
-const crownRestPosition = fn(crownPositionSrc);
+const coreMorph = fn(coreMorphSrc);
 const woodRestPosition = fn(woodPositionSrc);
 const windOffsetAt = fn(windOffsetSrc);
 const clusterBend = fn(clusterBendSrc);
@@ -47,7 +46,6 @@ const woodMorph = fn(woodMorphSrc);
 const rotateVector = fn(rotateVectorSrc);
 const decalPosition = fn(decalPositionSrc);
 const sunVisibilityAt = fn(sunVisibilitySrc);
-const proxyNormal = fn(proxyNormalSrc);
 const leafSphereSample = fn(leafSphereSampleSrc, [leafSampleCore]);
 const innerFadeThreshold = fn(innerFadeSrc);
 const shellFadeThreshold = fn(shellFadeSrc);
@@ -122,7 +120,6 @@ export const instanceUniforms = {
   tree: perInstance('tree', new THREE.Vector4(8, 0, 0, 0)),
   lodA: perInstance('lodA', new THREE.Vector4(1, 0, 0, 0)),
   lodB: perInstance('lodB', new THREE.Vector4(0.8, 2, 0, 0)),
-  lodC: perInstance('lodC', new THREE.Vector4(2, 0, 0, 0)),
   lodD: perInstance('lodD', new THREE.Vector4(0.5, 0, 0, 0)),
   // farCoverageScale of the shell and inner atlases at the instance's cutoff
   farLeaf: perInstance('farLeaf', new THREE.Vector4(1, 1, 0, 0)),
@@ -150,7 +147,8 @@ function foliageMaterial(side) {
 }
 
 // Shading, noise and shadows use the rest position (all LOD morphs, no wind) so that the
-// pattern rides along with the swaying vertices instead of sliding across them.
+// pattern rides along with the swaying vertices instead of sliding across them. Normals of the
+// cluster shape are baked per vertex and geomorph along with the positions.
 export function createTreeMaterials(asset, atlases) {
   const I = instanceUniforms;
   const spheres = texture(asset.sphereTexture);
@@ -188,7 +186,6 @@ export function createTreeMaterials(asset, atlases) {
   const sunVisibility = (p) => varying(sunVisibilityAt({ p, sun: I.sun, spheres, counts, shadow: params.shadow }));
   const windAt = (anchor) => windOffsetAt({ anchor, wind: I.wind, tree: I.tree });
   const windArgs = { spheres, wind: I.wind, tree: I.tree, windBend: params.windBend };
-  const solidLeaf = vec4(1, 0.5, 0.5, 0.5);
 
   const shell = foliageMaterial(THREE.DoubleSide);
   {
@@ -213,6 +210,7 @@ export function createTreeMaterials(asset, atlases) {
       patchData,
       lodA: I.lodA,
     }));
+    const proxy = mix(attribute('proxyNormal', 'vec3'), attribute('morphProxy', 'vec3'), shellMorphFactor({ patchData, lodA: I.lodA }));
     const patchUv = varying(shellPatchUv({ patchUv: attribute('patchUv', 'vec2'), morphUv: attribute('morphUv', 'vec2'), patchData, lodA: I.lodA }));
     const patchEdge = float(1).sub(patchUv.x.mul(patchUv.x.oneMinus()).mul(patchUv.y).mul(patchUv.y.oneMinus()).mul(16));
     const bend = clusterBend({ clusterIndex, ...windArgs });
@@ -225,9 +223,9 @@ export function createTreeMaterials(asset, atlases) {
     const ao = nPatchAo.w.mul(mix(float(1), params.tone.w, patchData.x.mul(near)));
     shell.colorNode = foliageShade({
       ...shadeArgs,
-      nProxy: rotateVector({ v: proxyNormal({ p: farV, clusterIndex, merge: float(0), spheres, counts }), w: bendV }),
+      nProxy: rotateVector({ v: varying(proxy), w: bendV }),
       nDetail: vec4(nPatch, params.look2.x.mul(near)),
-      shadeIn: vec4(ao, ao, 1, 0),
+      ao,
       posLocal: restV,
       sunVis: sunVisibility(rest),
       leaf: leafSphereSample({
@@ -259,47 +257,37 @@ export function createTreeMaterials(asset, atlases) {
   const core = foliageMaterial(THREE.DoubleSide);
   {
     const coreData = attribute('coreData', 'vec4');
+    const clusterIndex = coreData.y;
     const cCenter = attribute('cCenter', 'vec3');
-    const crownPos = attribute('crownPos', 'vec3');
-    const merge = I.lodB.w;
-    const coreArgs = {
-      surfacePos: attribute('position', 'vec3'),
-      morphPos: attribute('morphPos', 'vec3'),
-      coreData,
-      cCenter,
-      crownPos,
-    };
-    const rest = coreRestPosition({ ...coreArgs, lodB: I.lodB });
-    const unmerged = varying(coreRestPosition({ ...coreArgs, lodB: vec4(I.lodB.xyz, 0) }));
-    const bend = clusterBend({ clusterIndex: coreData.y, ...windArgs }).mul(float(1).sub(merge));
-    core.positionNode = rest
-      .add(windAt(mix(cCenter, crownPos, merge)))
-      .add(clusterDeform({ p: rest, clusterIndex: coreData.y, ...windArgs, bend, amount: float(1).sub(merge) }));
+    const morph = coreMorph({ coreData, lodB: I.lodB });
+    const rest = mix(attribute('position', 'vec3'), attribute('morphPos', 'vec3'), morph);
+    const bend = clusterBend({ clusterIndex, ...windArgs });
+    core.positionNode = rest.add(windAt(cCenter)).add(clusterDeform({ p: rest, clusterIndex, ...windArgs, bend, amount: float(1) }));
     const restV = varying(rest);
-    const leaf = leafSphereSample({
-      tex: leafTex,
-      samp: leafTex,
-      p: unmerged,
-      clusterIndex: coreData.y,
-      spheres,
-      cutoff: I.lodD.x,
-      far: leafFar,
-      patchRand: float(0.5),
-      softness: params.edge.x,
-      threshold: float(0),
-      shrink: params.leafShrink,
-    });
+    const proxy = mix(attribute('normal', 'vec3'), attribute('morphNormal', 'vec3'), morph);
     core.colorNode = foliageShade({
       ...shadeArgs,
-      nProxy: rotateVector({ v: proxyNormal({ p: restV, clusterIndex: coreData.y, merge, spheres, counts }), w: varying(bend) }),
+      nProxy: rotateVector({ v: varying(proxy), w: varying(bend) }),
       nDetail: vec4(0),
-      shadeIn: vec4(attribute('ao', 'vec2'), 1, merge),
+      ao: attribute('ao', 'float'),
       posLocal: restV,
       sunVis: sunVisibility(rest),
-      leaf: mix(leaf, solidLeaf, I.lodC.z),
-      misc: vec4(coreData.y, 0, I.lodD.y, 1),
+      leaf: leafSphereSample({
+        tex: leafTex,
+        samp: leafTex,
+        p: restV,
+        clusterIndex,
+        spheres,
+        cutoff: I.lodD.x,
+        far: leafFar,
+        patchRand: float(0.5),
+        softness: params.edge.x,
+        threshold: float(0),
+        shrink: params.leafShrink,
+      }),
+      misc: vec4(clusterIndex, 0, I.lodD.y, 1),
       noisePos: restV,
-      bulkCenter: varying(mix(cCenter, crownInfo.xyz, merge)),
+      bulkCenter: varying(cCenter),
     });
   }
 
@@ -309,17 +297,15 @@ export function createTreeMaterials(asset, atlases) {
     const center = cCenter.xyz;
     const clusterIndex = cCenter.w;
     const rest = attribute('position', 'vec3');
-    const amount = float(1).sub(I.lodB.w);
-    const bend = clusterBend({ clusterIndex, ...windArgs }).mul(amount);
-    inner.positionNode = rest.add(windAt(center)).add(clusterDeform({ p: rest, clusterIndex, ...windArgs, bend, amount }));
+    const bend = clusterBend({ clusterIndex, ...windArgs });
+    inner.positionNode = rest.add(windAt(center)).add(clusterDeform({ p: rest, clusterIndex, ...windArgs, bend, amount: float(1) }));
     const restV = varying(rest);
-    const nProxy = rotateVector({ v: proxyNormal({ p: restV, clusterIndex, merge: float(0), spheres, counts }), w: varying(bend) });
-    const shade = params.inner.x;
+    const nProxy = rotateVector({ v: varying(attribute('normal', 'vec3')), w: varying(bend) });
     inner.colorNode = foliageShade({
       ...shadeArgs,
       nProxy,
       nDetail: vec4(0),
-      shadeIn: vec4(shade, shade, 1, 0),
+      ao: params.inner.x,
       posLocal: restV,
       sunVis: sunVisibility(rest),
       leaf: leafSphereSample({
@@ -342,32 +328,6 @@ export function createTreeMaterials(asset, atlases) {
     });
   }
 
-  const crown = foliageMaterial(THREE.FrontSide);
-  {
-    const pos = attribute('position', 'vec3');
-    const rest = crownRestPosition({
-      pos,
-      morphPos: attribute('morphPos', 'vec3'),
-      crownData: attribute('crownData', 'vec4'),
-      lodC: I.lodC,
-    });
-    crown.positionNode = rest.add(windAt(pos));
-    const restV = varying(rest);
-    const ao = attribute('ao', 'float');
-    crown.colorNode = foliageShade({
-      ...shadeArgs,
-      nProxy: proxyNormal({ p: restV, clusterIndex: float(0), merge: float(1), spheres, counts }),
-      nDetail: vec4(0),
-      shadeIn: vec4(ao, ao, 1, 1),
-      posLocal: restV,
-      sunVis: sunVisibility(rest),
-      leaf: solidLeaf,
-      misc: vec4(0, 0, I.lodD.y, 1),
-      noisePos: restV,
-      bulkCenter: crownInfo.xyz,
-    });
-  }
-
   const wood = new THREE.MeshBasicNodeMaterial();
   wood.fog = false;
   {
@@ -378,7 +338,7 @@ export function createTreeMaterials(asset, atlases) {
     const axisPos = mix(attribute('axisPos', 'vec3'), attribute('morphAxis', 'vec3'), morph);
     const pos = mix(attribute('position', 'vec3'), attribute('morphPos', 'vec3'), morph);
     const rest = woodRestPosition({ pos, axisPos, woodData, lodW: I.wood });
-    wood.positionNode = rest.add(woodWind({ pos: rest, axisPos, woodData, ...windArgs, lodW: I.wood }));
+    wood.positionNode = rest.add(woodWind({ pos: rest, axisPos, woodData, ...windArgs }));
     wood.colorNode = woodShade({
       n: varying(mix(attribute('normal', 'vec3'), attribute('morphNormal', 'vec3'), morph)),
       posLocal: varying(rest),
@@ -426,7 +386,7 @@ export function createTreeMaterials(asset, atlases) {
     });
   }
 
-  return { shell, core, inner, crown, wood, decal };
+  return { shell, core, inner, wood, decal };
 }
 
 export function disposeTreeMaterials(materials) {

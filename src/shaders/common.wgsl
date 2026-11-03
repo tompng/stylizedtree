@@ -92,8 +92,8 @@ fn st_windGust(p: vec3f, wind: vec4f, tree: vec4f) -> f32 {
 }
 
 // Rotation vector of cluster ci bending on its twig, about the pivot in sphere texture row 5 (where
-// the twig forks off its limb; w = flexibility, 0 for the filler). The twig turns toward the wind in
-// proportion to how far it is from pointing along it.
+// the twig forks off its limb; w = flexibility). The twig turns toward the wind in proportion to
+// how far it is from pointing along it.
 fn st_clusterBend(ci: i32, spheres: texture_2d<f32>, wind: vec4f, tree: vec4f, windBend: vec4f) -> vec3f {
   let bendAmount = windBend.x;
   let center = textureLoad(spheres, vec2i(ci, 0), 0).xyz;
@@ -162,67 +162,6 @@ fn st_applyFog(color: vec3f, camToPoint: vec3f, sunDir: vec3f, horizon: vec3f, s
   let f = 1.0 - exp(-dist * density);
   let fogColor = st_fogColor(camToPoint / max(dist, 0.0001), sunDir, horizon, sunHaze);
   return mix(color, fogColor, f);
-}
-
-// Same fields as clusterShape.js / CrownField in JS.
-// Cluster surface: |q / axes| = s(q̂), s(n) = base + Σ w·exp(κ(n·u - 1)).
-fn st_clusterSdf(p: vec3f, ci: i32, spheres: texture_2d<f32>, lobeCount: i32) -> f32 {
-  let c = textureLoad(spheres, vec2i(ci, 0), 0).xyz;
-  let a = textureLoad(spheres, vec2i(ci, 2), 0).xyz;
-  let shape = textureLoad(spheres, vec2i(ci, 3), 0);
-  let q = p - c;
-  let len = max(length(q), 0.000001);
-  let n = q / len;
-  var s = shape.x;
-  for (var k = 0; k < lobeCount; k = k + 1) {
-    let lobe = textureLoad(spheres, vec2i(ci, 6 + k), 0);
-    s = s + lobe.w * exp(shape.y * (dot(n, lobe.xyz) - 1.0));
-  }
-  let g = max(length(q / a), 0.000001);
-  return len * (g - s) / g;
-}
-
-fn st_clusterNormal(p: vec3f, ci: i32, spheres: texture_2d<f32>, lobeCount: i32) -> vec3f {
-  let c = textureLoad(spheres, vec2i(ci, 0), 0).xyz;
-  let a = textureLoad(spheres, vec2i(ci, 2), 0).xyz;
-  let shape = textureLoad(spheres, vec2i(ci, 3), 0);
-  let q = p - c;
-  let len = max(length(q), 0.000001);
-  let n = q / len;
-  var s = shape.x;
-  var ds = vec3f(0.0);
-  for (var k = 0; k < lobeCount; k = k + 1) {
-    let lobe = textureLoad(spheres, vec2i(ci, 6 + k), 0);
-    let d = dot(n, lobe.xyz);
-    let e = lobe.w * exp(shape.y * (d - 1.0));
-    s = s + e;
-    ds = ds + (lobe.xyz - d * n) * (e * shape.y / len);
-  }
-  let g = max(length(q / a), 0.000001);
-  return normalize(q / (a * a * g * s) - ds * (g / (s * s)));
-}
-
-fn st_smin(a: f32, b: f32, k: f32) -> f32 {
-  let h = max(k - abs(a - b), 0.0) / k;
-  return min(a, b) - h * h * k * 0.25;
-}
-
-fn st_crownSdf(p: vec3f, spheres: texture_2d<f32>, count: i32, lobeCount: i32, k: f32) -> f32 {
-  var d = 0.0;
-  for (var i = 0; i < count; i = i + 1) {
-    let e = st_clusterSdf(p, i, spheres, lobeCount);
-    d = select(st_smin(d, e, k), e, i == 0);
-  }
-  return d;
-}
-
-fn st_crownNormal(p: vec3f, spheres: texture_2d<f32>, count: i32, lobeCount: i32, k: f32) -> vec3f {
-  let e = vec2f(1.0, -1.0) * 0.02;
-  return normalize(
-    e.xyy * st_crownSdf(p + e.xyy, spheres, count, lobeCount, k) +
-    e.yyx * st_crownSdf(p + e.yyx, spheres, count, lobeCount, k) +
-    e.yxy * st_crownSdf(p + e.yxy, spheres, count, lobeCount, k) +
-    e.xxx * st_crownSdf(p + e.xxx, spheres, count, lobeCount, k));
 }
 
 // Branch chains in row 1: each texel is (point, radius); a negative radius starts a new chain.

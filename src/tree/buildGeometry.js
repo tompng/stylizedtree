@@ -1,8 +1,10 @@
 import * as THREE from 'three/webgpu';
 import { Rng } from '../math.js';
+import { ClusterOcclusion } from './clusterOcclusion.js';
 import { clusterNormal, clusterSurfacePoint } from './clusterShape.js';
-import { RHOMBUS_POINTS, RHOMBUS_TRIANGLES, interpolateOnTriangles, rhombusPoint, triacontahedronRhombi } from './clusterTiling.js';
-import { CrownField } from './crownField.js';
+import {
+  RHOMBUS_HALVES, RHOMBUS_POINTS, RHOMBUS_QUARTERS, interpolateOnTriangles, rhombusPoint, triacontahedronRhombi,
+} from './clusterTiling.js';
 import { buildIcosphere } from './icosphere.js';
 
 export const defaultShellParams = {
@@ -16,11 +18,9 @@ export const defaultShellParams = {
   // magnification at the average depth).
   leafSizeCompensation: true,
   gridSegments: 3,
-  crownSmooth: 1.0,
 };
 
 const INNER_LEVEL = 1;
-const CROWN_MAX_LEVEL = 2;
 
 class AttributeWriter {
   constructor(count, layout) {
@@ -66,46 +66,41 @@ class AttributeWriter {
 }
 
 export function buildTreeAsset(tree, shellParams) {
-  const field = new CrownField(tree, shellParams.crownSmooth);
-  const tiling = clusterTilings(tree, shellParams, field);
+  const occlusion = new ClusterOcclusion(tree);
+  const tiling = clusterTilings(tree, shellParams, occlusion);
   return {
     tree,
     crownRadius: Math.max(tree.crownRadii.x, tree.crownRadii.y),
     sphereTexture: buildSphereTexture(tree),
-    counts: new THREE.Vector4(tree.clusters.length, tree.woodChains.length, shellParams.crownSmooth, tree.clusters[0].shape.lobes.length),
+    counts: new THREE.Vector4(tree.clusters.length, tree.woodChains.length, 0, 0),
     crownInfo: new THREE.Vector4(tree.crownCenter.x, tree.crownCenter.y, tree.crownCenter.z, Math.max(tree.crownRadii.x, tree.crownRadii.z)),
-    core: buildCore(tree, field, tiling),
+    core: buildCore(tree, tiling),
     inner: buildInner(tree, shellParams),
-    shell: buildShell(tree, field, shellParams, tiling),
-    crown: buildCrown(field),
-    wood: buildWood(tree, field),
+    shell: buildShell(tree, occlusion, shellParams, tiling),
+    wood: buildWood(tree, occlusion),
   };
 }
 
 export function disposeTreeAsset(asset) {
   asset.sphereTexture.dispose();
-  for (const part of [asset.core, asset.inner, asset.shell, asset.crown, asset.wood]) part.geometry.dispose();
+  for (const part of [asset.core, asset.inner, asset.shell, asset.wood]) part.geometry.dispose();
 }
 
-// Rows: 0 = center + shadow radius (0 casts no shadow), 1 = wood chain points, 2 = axes,
-// 3 = lobe base, lobe sharpness, leaf atlas pattern, -, 4 = leaf atlas rotation quaternion,
-// 5 = wind pivot (where the cluster's twig forks off its limb) + flexibility, 6.. = one lobe
-// (direction, weight) per row.
+// Rows: 0 = center + shadow radius, 1 = wood chain points, 2 = axes, 3 = leaf atlas pattern,
+// 4 = leaf atlas rotation quaternion, 5 = wind pivot (where the cluster's twig forks off its limb)
+// + flexibility.
 function buildSphereTexture(tree) {
   const rng = new Rng(tree.seed * 13 + 5);
   const width = Math.max(tree.clusters.length, tree.woodChains.length, 1);
-  const lobeCount = tree.clusters[0].shape.lobes.length;
-  const height = 6 + lobeCount;
+  const height = 6;
   const data = new Float32Array(width * height * 4);
   const put = (row, column, values) => data.set(values, (width * row + column) * 4);
   tree.clusters.forEach((c, i) => {
-    const shadowRadius = c.isFiller ? 0 : Math.cbrt(c.axes.x * c.axes.y * c.axes.z) * 0.95;
-    put(0, i, [c.center.x, c.center.y, c.center.z, shadowRadius]);
+    put(0, i, [c.center.x, c.center.y, c.center.z, Math.cbrt(c.axes.x * c.axes.y * c.axes.z) * 0.95]);
     put(2, i, [c.axes.x, c.axes.y, c.axes.z, 0]);
-    put(3, i, [c.shape.base, c.shape.sharpness, rng.next() < 0.5 ? 0 : 1, 0]);
+    put(3, i, [rng.next() < 0.5 ? 0 : 1, 0, 0, 0]);
     put(4, i, randomQuaternion(rng));
-    put(5, i, [c.pivot.x, c.pivot.y, c.pivot.z, c.isFiller ? 0 : 1]);
-    c.shape.lobes.forEach(({ dir, weight }, k) => put(6 + k, i, [dir.x, dir.y, dir.z, weight]));
+    put(5, i, [c.pivot.x, c.pivot.y, c.pivot.z, 1]);
   });
   tree.woodChains.forEach((s, i) => put(1, i, [s.center.x, s.center.y, s.center.z, s.radius]));
   const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
@@ -126,32 +121,20 @@ function randomQuaternion(rng) {
   return [s * Math.sin(a), s * Math.cos(a), t * Math.sin(b), t * Math.cos(b)];
 }
 
-function levelRanges(maxLevel, groupCount, verticesPerGroup, levels) {
-  const indices = [];
-  const ranges = [];
-  for (let level = maxLevel; level >= 0; level--) {
-    const start = indices.length;
-    for (let g = 0; g < groupCount; g++) {
-      for (const v of levels[level]) indices.push(g * verticesPerGroup + v);
-    }
-    ranges[level] = { start, count: indices.length - start };
-  }
-  return { indices, ranges };
-}
-
-// Each cluster is tiled by the 30 rhombi of a rhombic triacontahedron, turned by a random
-// rotation (identity for the filler). The shell's patches subdivide these rhombi and collapse onto
-// the core mesh built over them (RHOMBUS_TRIANGLES): four triangles around each rhombus center when
-// the patch grid has a vertex there (even patchDivisions), otherwise two.
-function clusterTilings(tree, params, field) {
+// Each cluster is tiled by the 30 rhombi of a rhombic triacontahedron turned by a random rotation.
+// Corners 0 and 2 of every rhombus are icosahedron vertices, corners 1 and 3 centers of
+// icosahedron faces. The shell's patches subdivide these rhombi and collapse onto the core mesh
+// built over them: four triangles around each rhombus center when the patch grid has a vertex
+// there (even patchDivisions), otherwise two. Normals of the cluster shape are baked per vertex.
+function clusterTilings(tree, params, occlusion) {
   const rng = new Rng(tree.seed * 7 + 11);
   const rhombi = triacontahedronRhombi();
-  const topLevel = params.patchDivisions % 2 === 0 ? 1 : 0;
+  const quartered = params.patchDivisions % 2 === 0;
   return {
-    topLevel,
+    quartered,
+    topTriangles: quartered ? RHOMBUS_QUARTERS : RHOMBUS_HALVES,
     clusters: tree.clusters.map((cluster, ci) => {
-      const rotation = new THREE.Quaternion();
-      if (!cluster.isFiller) rotation.setFromAxisAngle(rng.unitVector(), rng.next() * Math.PI * 2);
+      const rotation = new THREE.Quaternion().setFromAxisAngle(rng.unitVector(), rng.next() * Math.PI * 2);
       const corners = rhombi.map((r) => r.map((d) => d.clone().applyQuaternion(rotation)));
       const keys = new Map();
       const dirs = [];
@@ -165,56 +148,76 @@ function clusterTilings(tree, params, field) {
       };
       const rhombusVertices = corners.map((rhombus) => {
         const ids = rhombus.map(vertexOf);
-        if (topLevel === 1) ids.push(vertexOf(rhombusPoint(rhombus, 0.5, 0.5)));
+        if (quartered) ids.push(vertexOf(rhombusPoint(rhombus, 0.5, 0.5)));
         return ids;
       });
       const positions = dirs.map((dir) => clusterSurfacePoint(cluster, dir));
-      const ao = positions.map((p) => {
-        const n = clusterNormal(cluster, p);
-        return field.occlusion(p.clone().addScaledVector(n, 0.03), n, ci);
-      });
-      return { corners, dirs, positions, ao, rhombusVertices };
+      const normals = positions.map((p) => clusterNormal(cluster, p));
+      const ao = positions.map((p, i) => occlusion.occlusion(p.clone().addScaledVector(normals[i], 0.03), normals[i], ci));
+      return { corners, dirs, positions, normals, ao, rhombusVertices };
     }),
   };
 }
 
-// Level 1 (four triangles per rhombus) geomorphs into level 0 (two): each rhombus center moves to
-// the midpoint of the c00-c11 diagonal, where it lies on the level 0 triangles.
-function buildCore(tree, field, tiling) {
-  const { topLevel } = tiling;
+// Core levels, each geomorphing into the next coarser one: 2 = four triangles per rhombus (only
+// when quartered), 1 = two, the rhombus centers moved to the midpoints of the c00-c11 diagonals,
+// 0 = the icosahedron, each face-center corner moved to the centroid of its icosahedron face,
+// which flattens the three triangles around it into that face. Morph targets are averages of the
+// coarser vertices, unnormalized for normals as well, since that is what the coarser triangles
+// interpolate there.
+function buildCore(tree, tiling) {
+  const topLevel = tiling.quartered ? 2 : 1;
   const groups = tree.clusters.map((cluster, ci) => {
-    const { dirs, positions, ao, rhombusVertices } = tiling.clusters[ci];
+    const { dirs, positions, normals, ao, rhombusVertices } = tiling.clusters[ci];
     const birth = dirs.map(() => 0);
-    const morphPos = positions.map((p) => p);
-    if (topLevel === 1) {
-      for (const ids of rhombusVertices) {
-        birth[ids[4]] = 1;
-        morphPos[ids[4]] = positions[ids[0]].clone().add(positions[ids[2]]).multiplyScalar(0.5);
+    const target = positions.map((pos, i) => ({ pos, normal: normals[i] }));
+    const average = (ids) => ({
+      pos: ids.reduce((sum, id) => sum.add(positions[id]), new THREE.Vector3()).divideScalar(ids.length),
+      normal: ids.reduce((sum, id) => sum.add(normals[id]), new THREE.Vector3()).divideScalar(ids.length),
+    });
+    const faceCorners = new Map();
+    for (const ids of rhombusVertices) {
+      for (const k of [1, 3]) {
+        if (!faceCorners.has(ids[k])) faceCorners.set(ids[k], new Set());
+        faceCorners.get(ids[k]).add(ids[0]).add(ids[2]);
       }
     }
-    const levels = RHOMBUS_TRIANGLES.slice(0, topLevel + 1).map((triangles) =>
-      rhombusVertices.flatMap((ids) => triangles.flatMap((triangle) => triangle.map((k) => ids[k]))));
-    return { cluster, ci, dirs, positions, ao, birth, morphPos, levels };
+    const icosahedronFaces = [];
+    for (const [center, set] of faceCorners) {
+      const [a, b, c] = [...set];
+      birth[center] = 1;
+      target[center] = average([a, b, c]);
+      const normal = dirs[b].clone().sub(dirs[a]).cross(dirs[c].clone().sub(dirs[a]));
+      icosahedronFaces.push(...(normal.dot(dirs[center]) > 0 ? [a, b, c] : [a, c, b]));
+    }
+    if (tiling.quartered) {
+      for (const ids of rhombusVertices) {
+        birth[ids[4]] = 2;
+        target[ids[4]] = average([ids[0], ids[2]]);
+      }
+    }
+    const rhombusFaces = (triangles) => rhombusVertices.flatMap((ids) => triangles.flatMap((t) => t.map((k) => ids[k])));
+    const levels = [icosahedronFaces, rhombusFaces(RHOMBUS_HALVES)];
+    if (tiling.quartered) levels.push(rhombusFaces(RHOMBUS_QUARTERS));
+    return { cluster, ci, positions, normals, ao, birth, target, levels };
   });
 
-  const vertexCount = groups.reduce((sum, g) => sum + g.dirs.length, 0);
+  const vertexCount = groups.reduce((sum, g) => sum + g.positions.length, 0);
   const w = new AttributeWriter(vertexCount, {
-    position: 3, morphPos: 3, coreData: 4, cCenter: 3, crownPos: 3, ao: 2,
+    position: 3, morphPos: 3, normal: 3, morphNormal: 3, coreData: 4, cCenter: 3, ao: 1,
   });
   const levelIndices = Array.from({ length: topLevel + 1 }, () => []);
   let base = 0;
-  for (const { cluster, ci, positions, ao, birth, morphPos, levels } of groups) {
+  for (const { cluster, ci, positions, normals, ao, birth, target, levels } of groups) {
     positions.forEach((p, vi) => {
       const index = base + vi;
-      const hull = field.hullPoint(p.clone().sub(field.origin).normalize());
-      const nFar = field.normal(hull);
-      const aoFar = field.occlusion(hull.clone().addScaledVector(nFar, 0.03), nFar);
       w.setVector('position', index, p);
-      w.setVector('morphPos', index, morphPos[vi]);
-      w.set('coreData', index, birth[vi], ci, cluster.isFiller ? 1 : 0, 0);
+      w.setVector('morphPos', index, target[vi].pos);
+      w.setVector('normal', index, normals[vi]);
+      w.setVector('morphNormal', index, target[vi].normal);
+      w.set('coreData', index, birth[vi], ci, 0, 0);
       w.setVector('cCenter', index, cluster.center);
-      w.setVector('crownPos', index, hull);
-      w.set('ao', index, ao[vi], aoFar);
+      w.set('ao', index, ao[vi]);
     });
     levels.forEach((faces, level) => {
       for (const v of faces) levelIndices[level].push(base + v);
@@ -240,36 +243,20 @@ function concatLevels(levelIndices) {
 function buildInner(tree, params) {
   const ico = buildIcosphere(INNER_LEVEL);
   const perCluster = ico.dirs.length;
-  const clusters = tree.clusters.slice(0, tree.leafClusterCount);
-  const w = new AttributeWriter(clusters.length * perCluster, { position: 3, cCenter: 4 });
+  const { clusters } = tree;
+  const w = new AttributeWriter(clusters.length * perCluster, { position: 3, normal: 3, cCenter: 4 });
   clusters.forEach((cluster, ci) => {
     ico.dirs.forEach((dir, vi) => {
       const index = ci * perCluster + vi;
-      w.setVector('position', index, clusterSurfacePoint(cluster, dir, 1 - params.depth));
+      const p = clusterSurfacePoint(cluster, dir, 1 - params.depth);
+      w.setVector('position', index, p);
+      w.setVector('normal', index, clusterNormal(cluster, p));
       w.setVector('cCenter', index, cluster.center, ci);
     });
   });
   const faces = ico.levels[INNER_LEVEL];
   const indices = clusters.flatMap((_, ci) => faces.map((v) => ci * perCluster + v));
   return { geometry: w.toGeometry(indices) };
-}
-
-function buildCrown(field) {
-  const ico = buildIcosphere(CROWN_MAX_LEVEL);
-  const hull = ico.dirs.map((d) => field.hullPoint(d));
-  const w = new AttributeWriter(hull.length, { position: 3, morphPos: 3, crownData: 4, ao: 1 });
-  hull.forEach((p, vi) => {
-    const parents = ico.parents[vi];
-    const morphPos = parents ? hull[parents[0]].clone().add(hull[parents[1]]).multiplyScalar(0.5) : p;
-    const n = field.normal(p);
-    const ao = field.occlusion(p.clone().addScaledVector(n, 0.03), n);
-    w.setVector('position', vi, p);
-    w.setVector('morphPos', vi, morphPos);
-    w.set('crownData', vi, ico.birth[vi], 0, 0, 0);
-    w.set('ao', vi, ao);
-  });
-  const { indices, ranges } = levelRanges(CROWN_MAX_LEVEL, 1, hull.length, ico.levels);
-  return { geometry: w.toGeometry(indices), ranges };
 }
 
 // Linear scale from the leaf atlas (directions on the unit sphere) to the cluster surface over one
@@ -305,33 +292,34 @@ function patchMagnification(cluster, rhombus, i, j, n) {
 // lines on either side move onto one line of the coarser grid, the strip between them degenerates,
 // and every other cell becomes a coarser cell, patch coordinates included. All cells of a patch
 // share one diagonal direction, chosen so that the one-segment cell lies flat on the core triangles.
-function buildShell(tree, field, params, tiling) {
+function buildShell(tree, occlusion, params, tiling) {
   const rng = new Rng(tree.seed * 7 + 3);
   const n = params.patchDivisions;
   const segments = Math.max(1, Math.round(params.gridSegments));
-  const leafClusters = tree.clusters.slice(0, tree.leafClusterCount);
+  const leafClusters = tree.clusters;
   const rhombusCount = tiling.clusters[0].corners.length;
   const patchCount = leafClusters.length * rhombusCount * n * n;
   let perPatch = 0;
   for (let k = 1; k <= segments; k++) perPatch += (k + 1) ** 2;
   const w = new AttributeWriter(patchCount * perPatch, {
     position: 3, nearOffset: 3, patchCenter: 4, patchUv: 2, patchData: 4, nPatchAo: 4,
-    morphFar: 3, morphOffset: 3, morphNormalAo: 4, morphUv: 2,
+    morphFar: 3, morphOffset: 3, morphNormalAo: 4, morphUv: 2, proxyNormal: 3, morphProxy: 3,
   });
   const levelIndices = Array.from({ length: segments + 1 }, () => []);
-  const topTriangles = RHOMBUS_TRIANGLES[tiling.topLevel];
+  const { topTriangles } = tiling;
   const scale = Math.sqrt(Math.max(params.overlap, 1));
   let maxOffset = 0;
   let vertex = 0;
 
   leafClusters.forEach((cluster, ci) => {
-    const { corners, positions, ao: coreAo, rhombusVertices } = tiling.clusters[ci];
+    const { corners, positions, normals: coreNormals, ao: coreAo, rhombusVertices } = tiling.clusters[ci];
     const magnifications = corners.map((rhombus) =>
       Array.from({ length: n * n }, (_, k) => patchMagnification(cluster, rhombus, k % n, Math.floor(k / n), n)));
     const meanMagnification = magnifications.flat().reduce((sum, m) => sum + m, 0) / (corners.length * n * n);
     corners.forEach((rhombus, ri) => {
       const corePositions = rhombusVertices[ri].map((id) => positions[id]);
       const coreAoValues = rhombusVertices[ri].map((id) => coreAo[id]);
+      const coreNormalValues = rhombusVertices[ri].map((id) => coreNormals[id]);
       for (let j = 0; j < n; j++) {
         for (let i = 0; i < n; i++) {
           const depth = rng.next();
@@ -363,8 +351,8 @@ function buildShell(tree, field, params, tiling) {
             const e = 1e-3;
             const normal = nearAt(su + e, sv).sub(nearAt(su - e, sv)).cross(nearAt(su, sv + e).sub(nearAt(su, sv - e))).normalize();
             if (normal.dot(nProxy) < 0) normal.negate();
-            const ao = field.occlusion(far.clone().addScaledVector(nProxy, 0.03), nProxy, ci);
-            return { far, near, offset: near.clone().sub(far), normal, ao };
+            const ao = occlusion.occlusion(far.clone().addScaledVector(nProxy, 0.03), nProxy, ci);
+            return { far, near, offset: near.clone().sub(far), normal, ao, proxy: nProxy };
           };
           const cache = new Map();
           const grids = [];
@@ -377,7 +365,7 @@ function buildShell(tree, field, params, tiling) {
               return cache.get(key);
             });
           }
-          const antiDiagonal = tiling.topLevel === 1 && i + j === n - 1;
+          const antiDiagonal = tiling.quartered && i + j === n - 1;
           const onGrid = (k, su, sv, name) => {
             const cu = Math.min(Math.floor(su * k), k - 1);
             const cv = Math.min(Math.floor(sv * k), k - 1);
@@ -403,7 +391,7 @@ function buildShell(tree, field, params, tiling) {
                 target = grids[k - 1][cv * k + cu];
                 targetUv = [cu / (k - 1), cv / (k - 1)];
               } else if (k === 2) {
-                target = ['far', 'offset', 'normal', 'ao'].reduce((t, f) => ({ ...t, [f]: onGrid(1, su, sv, f) }), {});
+                target = ['far', 'offset', 'normal', 'ao', 'proxy'].reduce((t, f) => ({ ...t, [f]: onGrid(1, su, sv, f) }), {});
               } else {
                 const U = (i + su) / n;
                 const V = (j + sv) / n;
@@ -412,6 +400,7 @@ function buildShell(tree, field, params, tiling) {
                   offset: value.offset,
                   normal: value.normal,
                   ao: interpolateOnTriangles(topTriangles, RHOMBUS_POINTS, coreAoValues, U, V),
+                  proxy: interpolateOnTriangles(topTriangles, RHOMBUS_POINTS, coreNormalValues, U, V),
                 };
               }
               maxOffset = Math.max(maxOffset, value.offset.length());
@@ -425,6 +414,8 @@ function buildShell(tree, field, params, tiling) {
               w.setVector('morphOffset', vertex, target.offset);
               w.setVector('morphNormalAo', vertex, target.normal, target.ao);
               w.set('morphUv', vertex, ...targetUv);
+              w.setVector('proxyNormal', vertex, value.proxy);
+              w.setVector('morphProxy', vertex, target.proxy);
               vertex++;
             });
             for (let iv = 0; iv < k; iv++) {
@@ -458,7 +449,7 @@ function buildShell(tree, field, params, tiling) {
 const WOOD_RADIAL = [12, 8, 6];
 const WOOD_DETAIL_LEVELS = 3;
 
-function buildWood(tree, field) {
+function buildWood(tree, occlusion) {
   const halve = (count) => (count % 2 === 0 && count / 2 >= 3 ? count / 2 : count);
   const branches = [0, 1, 2].flatMap((level) => tree.branches.filter((b) => b.level === level));
   const meshes = branches.map((branch) => {
@@ -481,7 +472,7 @@ function buildWood(tree, field) {
         const cos = -Math.cos(a);
         const normal = new THREE.Vector3(cos * N.x + sin * B.x, cos * N.y + sin * B.y, cos * N.z + sin * B.z).normalize();
         const pos = axis.clone().addScaledVector(normal, r);
-        const ao = field.occlusion(pos.clone().addScaledVector(normal, 0.03), normal);
+        const ao = occlusion.occlusion(pos.clone().addScaledVector(normal, 0.03), normal);
         values.push({ pos, normal, axis, ao, t });
       }
     }
