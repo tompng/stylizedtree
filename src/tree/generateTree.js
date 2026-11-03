@@ -122,21 +122,29 @@ function growBranches(rng, params, crownCenter, clusters) {
     const outward = new Vector3(end.x - trunkTop.x, 0, end.z - trunkTop.z).normalize();
     const mid = trunkTop.clone().lerp(end, 0.5).addScaledVector(outward, 0.3).add(new Vector3(0, 0.2, 0));
     const start = trunkTop.clone().add(new Vector3(0, -0.35, 0));
-    branches.push({
+    const limb = {
       level: 1,
       curve: new CatmullRomCurve3([start, mid, end]),
-      radius: (t) => limbRadius * (1 - 0.4 * t),
-    });
+      radius: (t) => limbRadius * (1 - 0.4 * t) * tipTaper(t, 0.2),
+    };
+    branches.push(limb);
     for (const cluster of group) {
-      const twigMid = end.clone().lerp(cluster.center, 0.5).add(new Vector3(rng.signed() * 0.25, rng.signed() * 0.25, rng.signed() * 0.25));
+      const forkT = rng.range(0.55, 0.8);
+      const fork = limb.curve.getPointAt(forkT);
+      const baseRadius = Math.min(twigRadius, limb.radius(forkT) * 0.85);
+      const twigMid = fork.clone().lerp(cluster.center, 0.5).add(new Vector3(rng.signed() * 0.25, rng.signed() * 0.25, rng.signed() * 0.25));
       branches.push({
         level: 2,
-        curve: new CatmullRomCurve3([end.clone().addScaledVector(outward, -0.1), twigMid, cluster.center.clone()]),
-        radius: (t) => twigRadius * (1 - 0.5 * t),
+        curve: new CatmullRomCurve3([fork, twigMid, cluster.center.clone()]),
+        radius: (t) => baseRadius * (1 - 0.5 * t) * tipTaper(t, 0.4),
       });
     }
   }
   return branches;
+}
+
+function tipTaper(t, length) {
+  return Math.min(1, (1 - t) / length);
 }
 
 function sampleWoodChains(branches) {
