@@ -3,7 +3,7 @@ import { Rng } from '../math.js';
 
 // 2x2 atlas of leaf clumps. Channels: R = coverage (blurred so its edge can be sharpened with fwidth or kept soft),
 // G = per-leaf random, B = per-leaf brush gradient. G/B are 0.5 outside leaves so mips stay neutral.
-export function createLeafAtlas({ seed = 11, cell = 512, leavesPerClump = 46 } = {}) {
+export function createLeafAtlas({ seed = 11, cell = 512, leavesPerClump = 52 } = {}) {
   const size = cell * 2;
   const rng = new Rng(seed);
   const layers = ['alpha', 'rand', 'stroke'].map(() => {
@@ -33,24 +33,16 @@ export function createLeafAtlas({ seed = 11, cell = 512, leavesPerClump = 46 } =
       ctx.clip();
     }
 
-    alphaCtx.fillStyle = '#fff';
-    alphaCtx.beginPath();
-    alphaCtx.arc(cx, cy, R * 0.55, 0, Math.PI * 2);
-    alphaCtx.fill();
-
     const leaves = [];
     for (let i = 0; i < leavesPerClump; i++) {
-      const dist = R * 0.72 * Math.pow(rng.next(), 0.6);
+      const dist = R * 0.85 * rng.next();
       const a = rng.next() * Math.PI * 2;
-      const bx = cx + Math.cos(a) * dist;
-      const by = cy + Math.sin(a) * dist;
-      const heading = dist < R * 0.15 ? rng.next() * Math.PI * 2 : a + rng.signed() * 0.9;
-      let length = R * rng.range(0.3, 0.48);
-      const tipX = bx + Math.cos(heading) * length;
-      const tipY = by + Math.sin(heading) * length;
-      const tipDist = Math.hypot(tipX - cx, tipY - cy);
-      if (tipDist > R * 0.98) length *= Math.max(0.3, 1 - (tipDist - R * 0.98) / length);
-      leaves.push({ bx, by, heading, length, width: length * rng.range(0.34, 0.46), rand: rng.next(), dist });
+      const heading = dist < R * 0.2 ? rng.next() * Math.PI * 2 : a + rng.signed() * 0.7;
+      const length = Math.min(R * rng.range(0.2, 0.32), 2 * (R * 0.98 - dist));
+      if (length < R * 0.06) continue;
+      const x = cx + Math.cos(a) * dist;
+      const y = cy + Math.sin(a) * dist;
+      leaves.push({ x, y, heading, length, width: length * rng.range(0.5, 0.7), rand: rng.next(), dist });
     }
     leaves.sort((p, q) => q.dist - p.dist);
     for (const leaf of leaves) drawLeaf(layers, leaf);
@@ -79,37 +71,34 @@ export function createLeafAtlas({ seed = 11, cell = 512, leavesPerClump = 46 } =
   return texture;
 }
 
-function leafPath(ctx, length, width, half) {
+function leafPath(ctx, length, width, endAngle = Math.PI * 2) {
   ctx.beginPath();
-  ctx.moveTo(0, 0);
-  if (half <= 0) ctx.quadraticCurveTo(length * 0.45, -width, length, 0);
-  else ctx.lineTo(length, 0);
-  if (half >= 0) ctx.quadraticCurveTo(length * 0.45, width, 0, 0);
+  ctx.ellipse(0, 0, length / 2, width / 2, 0, 0, endAngle);
   ctx.closePath();
 }
 
-function drawLeaf([alphaCtx, randCtx, strokeCtx], { bx, by, heading, length, width, rand }) {
+function drawLeaf([alphaCtx, randCtx, strokeCtx], { x, y, heading, length, width, rand }) {
   for (const ctx of [alphaCtx, randCtx, strokeCtx]) {
     ctx.save();
-    ctx.translate(bx, by);
+    ctx.translate(x, y);
     ctx.rotate(heading);
   }
-  leafPath(alphaCtx, length, width, 0);
+  leafPath(alphaCtx, length, width);
   alphaCtx.fillStyle = '#fff';
   alphaCtx.fill();
 
   const g = Math.round(rand * 255);
-  leafPath(randCtx, length, width, 0);
+  leafPath(randCtx, length, width);
   randCtx.fillStyle = `rgb(${g},${g},${g})`;
   randCtx.fill();
 
-  const gradient = strokeCtx.createLinearGradient(0, 0, length, 0);
+  const gradient = strokeCtx.createLinearGradient(-length / 2, 0, length / 2, 0);
   gradient.addColorStop(0, 'rgb(70,70,70)');
   gradient.addColorStop(1, 'rgb(210,210,210)');
-  leafPath(strokeCtx, length, width, 0);
+  leafPath(strokeCtx, length, width);
   strokeCtx.fillStyle = gradient;
   strokeCtx.fill();
-  leafPath(strokeCtx, length, width, 1);
+  leafPath(strokeCtx, length, width, Math.PI);
   strokeCtx.fillStyle = 'rgba(0,0,0,0.22)';
   strokeCtx.fill();
 
