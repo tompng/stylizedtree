@@ -81,7 +81,7 @@ export const params = {
   // translucency, edgeBrightness, hueVariation, skyAmbient
   look: uniform(new THREE.Vector4(0.55, 0.08, 0.25, 0.6)),
   // patchNormalWeight, farDensity (scales leaf opacity once pixels span several leaves), dissolveFrequency, -
-  look2: uniform(new THREE.Vector4(0.35, 1, 1.6, 0)),
+  look2: uniform(new THREE.Vector4(0.35, 1.25, 1.6, 0)),
   // edgeSoftness, alphaDither, -, -
   edge: uniform(new THREE.Vector4(0.6, 0.25, 0, 0)),
   // start (1 - bump where leaves start shrinking), strength, grazing (edge-on patches), -
