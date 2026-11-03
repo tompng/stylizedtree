@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { Rng, clamp, fibonacciSphere } from '../math.js';
+import { clusterNormal, clusterSurfacePoint } from './clusterShape.js';
 import { CrownField } from './crownField.js';
 import { buildIcosphere } from './icosphere.js';
 
@@ -52,7 +53,7 @@ export function buildTreeAsset(tree, shellParams) {
     tree,
     crownRadius: Math.max(tree.crownRadii.x, tree.crownRadii.y),
     sphereTexture: buildSphereTexture(tree),
-    counts: new THREE.Vector4(tree.clusters.length, tree.woodChains.length, shellParams.crownSmooth, 0),
+    counts: new THREE.Vector4(tree.clusters.length, tree.woodChains.length, shellParams.crownSmooth, tree.clusters[0].shape.lobes.length),
     crownInfo: new THREE.Vector4(tree.crownCenter.x, tree.crownCenter.y, tree.crownCenter.z, Math.max(tree.crownRadii.x, tree.crownRadii.z)),
     core: buildCore(tree, field),
     shell: buildShell(tree, field, shellParams),
@@ -66,17 +67,23 @@ export function disposeTreeAsset(asset) {
   for (const part of [asset.core, asset.shell, asset.crown, asset.wood]) part.geometry.dispose();
 }
 
+// Rows: 0 = center + shadow radius (0 casts no shadow), 1 = wood chain points, 2 = axes,
+// 3 = lobe base + sharpness, 4.. = one lobe (direction, weight) per row.
 function buildSphereTexture(tree) {
   const width = Math.max(tree.clusters.length, tree.woodChains.length, 1);
-  const data = new Float32Array(width * 3 * 4);
+  const lobeCount = tree.clusters[0].shape.lobes.length;
+  const height = 4 + lobeCount;
+  const data = new Float32Array(width * height * 4);
+  const put = (row, column, values) => data.set(values, (width * row + column) * 4);
   tree.clusters.forEach((c, i) => {
-    data.set([c.center.x, c.center.y, c.center.z, Math.cbrt(c.axes.x * c.axes.y * c.axes.z) * 0.95], i * 4);
-    data.set([c.axes.x, c.axes.y, c.axes.z, 0], (width * 2 + i) * 4);
+    const shadowRadius = c.isFiller ? 0 : Math.cbrt(c.axes.x * c.axes.y * c.axes.z) * 0.95;
+    put(0, i, [c.center.x, c.center.y, c.center.z, shadowRadius]);
+    put(2, i, [c.axes.x, c.axes.y, c.axes.z, 0]);
+    put(3, i, [c.shape.base, c.shape.sharpness, 0, 0]);
+    c.shape.lobes.forEach(({ dir, weight }, k) => put(4 + k, i, [dir.x, dir.y, dir.z, weight]));
   });
-  tree.woodChains.forEach((s, i) => {
-    data.set([s.center.x, s.center.y, s.center.z, s.radius], (width + i) * 4);
-  });
-  const texture = new THREE.DataTexture(data, width, 3, THREE.RGBAFormat, THREE.FloatType);
+  tree.woodChains.forEach((s, i) => put(1, i, [s.center.x, s.center.y, s.center.z, s.radius]));
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
   texture.minFilter = THREE.NearestFilter;
   texture.magFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
@@ -105,20 +112,20 @@ function buildCore(tree, field) {
     position: 3, morphPos: 3, coreData: 4, cCenter: 3, crownPos: 3, ao: 2,
   });
   clusters.forEach((cluster, ci) => {
+    const surface = ico.dirs.map((dir) => clusterSurfacePoint(cluster, dir));
     ico.dirs.forEach((dir, vi) => {
       const index = ci * perCluster + vi;
       const parents = ico.parents[vi];
-      const morphDir = parents ? ico.dirs[parents[0]].clone().add(ico.dirs[parents[1]]).multiplyScalar(0.5) : dir;
-      const morphPos = morphDir.clone().multiply(cluster.axes).add(cluster.center);
-      const base = dir.clone().multiply(cluster.axes).add(cluster.center);
-      const nNear = dir.clone().divide(cluster.axes).normalize();
+      const base = surface[vi];
+      const morphPos = parents ? surface[parents[0]].clone().add(surface[parents[1]]).multiplyScalar(0.5) : base;
+      const nNear = clusterNormal(cluster, base);
       const aoNear = field.occlusion(base.clone().addScaledVector(nNear, 0.03), nNear, ci);
       const hull = field.hullPoint(base.clone().sub(field.origin).normalize());
       const nFar = field.normal(hull);
       const aoFar = field.occlusion(hull.clone().addScaledVector(nFar, 0.03), nFar);
       w.setVector('position', index, base);
       w.setVector('morphPos', index, morphPos);
-      w.set('coreData', index, ico.birth[vi], ci, 0, 0);
+      w.set('coreData', index, ico.birth[vi], ci, cluster.isFiller ? 1 : 0, 0);
       w.setVector('cCenter', index, cluster.center);
       w.setVector('crownPos', index, hull);
       w.set('ao', index, aoNear, aoFar);
@@ -189,7 +196,7 @@ function buildShell(tree, field, params) {
     const t2 = new THREE.Vector3().crossVectors(dir, t1);
     const tanA = Math.tan(patch.angle);
     const shellRadius = 1 + patch.lift;
-    const center = dir.clone().multiplyScalar(shellRadius).multiply(cluster.axes).add(cluster.center);
+    const center = clusterSurfacePoint(cluster, dir, shellRadius);
     const cos = Math.cos(patch.uvRotation);
     const sin = Math.sin(patch.uvRotation);
     const cellU = patch.cell % 2;
@@ -204,8 +211,8 @@ function buildShell(tree, field, params) {
         const u = -1 + (2 * iu) / segments;
         const v = -1 + (2 * iv) / segments;
         const d = dir.clone().addScaledVector(t1, u * tanA).addScaledVector(t2, v * tanA).normalize();
-        const base = d.clone().multiplyScalar(shellRadius).multiply(cluster.axes).add(cluster.center);
-        const nProxy = d.clone().divide(cluster.axes).normalize();
+        const base = clusterSurfacePoint(cluster, d, shellRadius);
+        const nProxy = clusterNormal(cluster, base);
         const s = Math.hypot(u, v);
         const flareVec = nProxy.clone().multiplyScalar(patch.flare * cluster.radius * s * s);
         maxFlare = Math.max(maxFlare, flareVec.length());

@@ -1,5 +1,6 @@
 import { CatmullRomCurve3, Vector3 } from 'three/webgpu';
 import { Rng, lerp, smoothstep } from '../math.js';
+import { lobeMean } from './clusterShape.js';
 
 export const defaultTreeParams = {
   seed: 5,
@@ -9,6 +10,9 @@ export const defaultTreeParams = {
   clusterCount: 12,
   clusterSize: 1.0,
   clusterFlatten: 0.8,
+  clusterLobes: 5,
+  clusterBumps: 0.3,
+  lobeSharpness: 3.5,
   trunkRadius: 0.32,
   limbCount: 4,
 };
@@ -21,6 +25,7 @@ export function generateTree(params) {
   const filler = {
     center: crownCenter.clone().add(new Vector3(0, -0.1 * crownRadii.y, 0)),
     axes: new Vector3(crownRadii.x * 0.62, crownRadii.y * 0.52, crownRadii.z * 0.62),
+    shape: flatShape(params),
     isFiller: true,
   };
   filler.radius = Math.cbrt(filler.axes.x * filler.axes.y * filler.axes.z);
@@ -57,9 +62,26 @@ function placeClusters(rng, params, crownCenter, crownRadii) {
       dir.y * (crownRadii.y - axes.y),
       dir.z * (crownRadii.z - axes.z),
     ).multiplyScalar(reach).add(crownCenter);
-    clusters.push({ center, axes, radius, isFiller: false });
+    clusters.push({ center, axes, radius, shape: lobedShape(rng, params, dir), isFiller: false });
   }
   return clusters;
+}
+
+function flatShape(params) {
+  const lobes = Array.from({ length: params.clusterLobes }, () => ({ dir: new Vector3(0, 1, 0), weight: 0 }));
+  return { base: 1, sharpness: params.lobeSharpness, lobes };
+}
+
+function lobedShape(rng, params, outward) {
+  const lobes = [];
+  let sum = 0;
+  for (let i = 0; i < params.clusterLobes; i++) {
+    const dir = rng.unitVector().addScaledVector(outward, 0.5).normalize();
+    const weight = params.clusterBumps * rng.range(0.6, 1.0);
+    lobes.push({ dir, weight });
+    sum += weight;
+  }
+  return { base: 1 - sum * lobeMean(params.lobeSharpness), sharpness: params.lobeSharpness, lobes };
 }
 
 function growBranches(rng, params, crownCenter, clusters) {

@@ -1,23 +1,10 @@
 import { Vector3 } from 'three/webgpu';
 import { fibonacciSphere, smoothstep } from '../math.js';
+import { clusterRatio, clusterSdf } from './clusterShape.js';
 
 function smin(a, b, k) {
   const h = Math.max(k - Math.abs(a - b), 0) / k;
   return Math.min(a, b) - h * h * k * 0.25;
-}
-
-// https://iquilezles.org/articles/ellipsoids/ (bound-ish approximation, not an exact distance)
-function ellipsoidSdf(x, y, z, c, a) {
-  const qx = x - c.x;
-  const qy = y - c.y;
-  const qz = z - c.z;
-  const k0 = Math.hypot(qx / a.x, qy / a.y, qz / a.z);
-  const k1 = Math.hypot(qx / (a.x * a.x), qy / (a.y * a.y), qz / (a.z * a.z));
-  return k1 > 1e-9 ? (k0 * (k0 - 1)) / k1 : -Math.min(a.x, a.y, a.z);
-}
-
-function normalizedRadius(p, { center: c, axes: a }) {
-  return Math.hypot((p.x - c.x) / a.x, (p.y - c.y) / a.y, (p.z - c.z) / a.z);
 }
 
 function rayEllipsoid(o, d, { center: c, axes: a }) {
@@ -37,16 +24,17 @@ function rayEllipsoid(o, d, { center: c, axes: a }) {
   return t > 0 ? t : Infinity;
 }
 
-// Smooth union of all cluster ellipsoids. Its outermost surface seen from the crown center
+// Smooth union of all clusters. Its outermost surface seen from the crown center
 // is the shape that every far LOD (merged cores, crown mesh) converges to.
 export class CrownField {
   constructor(tree, smoothK) {
-    this.items = tree.clusters.map((c) => ({ center: c.center, axes: c.axes }));
+    this.items = tree.clusters;
     this.k = Math.max(smoothK, 1e-3);
     this.origin = tree.crownCenter.clone();
     let reach = 0;
-    for (const it of this.items) {
-      reach = Math.max(reach, it.center.distanceTo(this.origin) + Math.max(it.axes.x, it.axes.y, it.axes.z));
+    for (const { center, axes, shape } of this.items) {
+      const maxScale = shape.lobes.reduce((s, l) => s + l.weight, shape.base);
+      reach = Math.max(reach, center.distanceTo(this.origin) + Math.max(axes.x, axes.y, axes.z) * maxScale);
     }
     this.reach = reach + this.k + 0.5;
     this.aoDirections = fibonacciSphere(64);
@@ -55,8 +43,8 @@ export class CrownField {
 
   sdf(x, y, z) {
     let d = Infinity;
-    for (const { center, axes } of this.items) {
-      const e = ellipsoidSdf(x, y, z, center, axes);
+    for (const cluster of this.items) {
+      const e = clusterSdf(cluster, x, y, z);
       d = d === Infinity ? e : smin(d, e, this.k);
     }
     return d;
@@ -113,15 +101,15 @@ export class CrownField {
       total += w;
       let nearest = Infinity;
       for (let i = 0; i < this.items.length; i++) {
-        if (i === exclude) continue;
+        if (i === exclude || this.items[i].isFiller) continue;
         nearest = Math.min(nearest, rayEllipsoid(p, d, this.items[i]));
       }
       if (nearest < this.aoRange) occluded += w * (1 - nearest / this.aoRange);
     }
     let ao = 1 - occluded / total;
     for (let i = 0; i < this.items.length; i++) {
-      if (i === exclude) continue;
-      const q = normalizedRadius(p, this.items[i]);
+      if (i === exclude || this.items[i].isFiller) continue;
+      const q = clusterRatio(this.items[i], p.x, p.y, p.z);
       if (q < 1) ao *= 0.3 + 0.7 * smoothstep(0.6, 1.0, q);
     }
     return ao;

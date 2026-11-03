@@ -59,8 +59,8 @@ export const params = {
   ramp: uniform(new THREE.Vector4(0.42, 0.66, 0.05, 0.16)),
   // translucency, edgeBrightness, hueVariation, skyAmbient
   look: uniform(new THREE.Vector4(0.55, 0.08, 0.25, 0.6)),
-  // patchNormalWeight, mipScale, dissolveFrequency, -
-  look2: uniform(new THREE.Vector4(0.35, 0.25, 1.6, 0)),
+  // patchNormalWeight, mipScale, dissolveFrequency, fillFrequency
+  look2: uniform(new THREE.Vector4(0.35, 0.25, 1.6, 1.8)),
   // density, softness (cluster-to-cluster sun occlusion)
   shadow: uniform(new THREE.Vector4(0.8, 0.35, 0, 0)),
   // strength, breakup, density, softness (ground shadow)
@@ -146,6 +146,8 @@ export function createTreeMaterials(asset, leafAtlas) {
       leaf: leafSample({ tex: leafTex, samp: leafTex, uv: uv(), cutoff: I.lodD.x, mipScale: params.look2.y, patchRand: patchData.y }),
       misc: vec4(patchData.w, patchData.z, 0, 0),
       noisePos: vec3(0),
+      solidFill: float(1),
+      bulkCenter: vec3(0),
     });
   }
 
@@ -175,6 +177,8 @@ export function createTreeMaterials(asset, leafAtlas) {
       leaf: solidLeaf,
       misc: vec4(coreData.y, 0, I.lodD.y, 1),
       noisePos: restV,
+      solidFill: I.lodC.z,
+      bulkCenter: varying(mix(cCenter, crownInfo.xyz, merge)),
     });
   }
 
@@ -200,6 +204,8 @@ export function createTreeMaterials(asset, leafAtlas) {
       leaf: solidLeaf,
       misc: vec4(0, 0, I.lodD.y, 1),
       noisePos: restV,
+      solidFill: float(1),
+      bulkCenter: crownInfo.xyz,
     });
   }
 

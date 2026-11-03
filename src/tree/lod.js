@@ -7,12 +7,12 @@ export const defaultLodSettings = {
   bias: 0,
   referencePixels: 400,
 
-  closeStart: 1.4,
-  closeEnd: 3.2,
-  pruneStart: 2.2,
+  fillStart: 1.2,
+  fillEnd: 3.0,
+  pruneStart: 2.6,
   pruneEnd: 3.8,
-  flareStart: 2.4,
-  flareEnd: 3.8,
+  flareStart: 1.8,
+  flareEnd: 3.4,
   corePolyStart: 3.6,
   corePolyEnd: 4.4,
   mergeStart: 3.8,
@@ -21,18 +21,16 @@ export const defaultLodSettings = {
 
   cutoffNear: 0.5,
   cutoffFar: 0.22,
-  coreScaleNear: 0.8,
-  coreScaleFar: 0.985,
-  aoInner: 0.55,
+  coreScale: 0.985,
+  aoInner: 0.7,
   compensation: 0.5,
   pruneFade: 0.08,
 };
 
 export function evaluateLod(level, s) {
-  const close = smoothstep(s.closeStart, s.closeEnd, level);
+  const fill = smoothstep(s.fillStart, s.fillEnd, level);
   const prune = smoothstep(s.pruneStart, s.pruneEnd, level);
   const keep = 1 - prune;
-  const coreScale = lerp(s.coreScaleNear, s.coreScaleFar, close);
   const coreT = clamp((level - s.corePolyStart) / Math.max(s.corePolyEnd - s.corePolyStart, 1e-3), 0, 1);
   const merge = smoothstep(s.mergeStart, s.mergeEnd, level);
   const crownT = 2 * clamp((level - s.mergeEnd) / Math.max(s.crownPolyEnd - s.mergeEnd, 1e-3), 0, 1);
@@ -40,13 +38,13 @@ export function evaluateLod(level, s) {
   return {
     level,
     flare: 1 - smoothstep(s.flareStart, s.flareEnd, level),
-    close,
+    fill,
     keep,
     keepThreshold: keep * (1 + s.pruneFade),
     grow: 1 + (Math.min(1 / Math.sqrt(Math.max(keep, 0.25)), 2) - 1) * s.compensation,
-    cutoff: lerp(s.cutoffNear, s.cutoffFar, close),
-    coreScale,
-    coreRadialAo: lerp(s.aoInner, 1, smoothstep(s.coreScaleNear, s.coreScaleFar - 0.01, coreScale)),
+    cutoff: lerp(s.cutoffNear, s.cutoffFar, fill),
+    coreScale: s.coreScale,
+    coreRadialAo: lerp(s.aoInner, 1, fill),
     dissolve: prune * (1 - smoothstep(s.crownPolyEnd, s.crownPolyEnd + 1.5, level)),
     coreLevel: coreT >= 1 ? 1 : 2,
     coreMorph: coreT >= 1 ? 0 : coreT,

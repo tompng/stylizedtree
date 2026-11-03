@@ -4,10 +4,12 @@ fn coreRestPosition(surfacePos: vec3f, morphPos: vec3f, coreData: vec4f, cCenter
   let morph = lodB.z;
   let merge = lodB.w;
   let birthLevel = coreData.x;
+  let isFiller = coreData.z > 0.5;
 
   var surface = surfacePos;
   if (abs(birthLevel - drawLevel) < 0.5) {
     surface = mix(surfacePos, morphPos, morph);
   }
-  return mix(cCenter + (surface - cCenter) * coreScale, crownPos, merge);
+  let scale = select(coreScale, 0.0, isFiller);
+  return mix(cCenter + (surface - cCenter) * scale, crownPos, merge);
 }

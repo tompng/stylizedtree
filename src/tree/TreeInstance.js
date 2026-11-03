@@ -92,7 +92,7 @@ export class TreeInstance {
 
     state.lodA.set(e.flare, e.keepThreshold, e.grow, lodSettings.pruneFade);
     state.lodB.set(e.coreScale, e.coreLevel, e.coreMorph, e.merge);
-    state.lodC.set(e.crownLevel, e.crownMorph, 0, 0);
+    state.lodC.set(e.crownLevel, e.crownMorph, e.fill, 0);
     state.lodD.set(e.cutoff, e.dissolve, e.coreRadialAo, e.flare);
     state.wood.set(1, e.limbScale, e.twigScale, 0);
 
@@ -102,7 +102,7 @@ export class TreeInstance {
     this.shell.geometry.setDrawRange(0, this.visiblePatches * indicesPerPatch);
 
     const coreRange = asset.core.ranges[e.coreLevel];
-    this.core.visible = !e.crownActive;
+    this.core.visible = !e.crownActive && (e.fill > 0 || e.merge > 0);
     this.core.geometry.setDrawRange(coreRange.start, coreRange.count);
 
     const crownRange = asset.crown.ranges[e.crownLevel];

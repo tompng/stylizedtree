@@ -113,14 +113,13 @@ function buildGui() {
   fLod.add(lodSettings, 'bias', -3, 3, 0.01);
   fLod.add(lodSettings, 'referencePixels', 100, 1000, 10);
   const fStages = fLod.addFolder('stage ranges (L)').close();
-  for (const key of ['closeStart', 'closeEnd', 'pruneStart', 'pruneEnd', 'flareStart', 'flareEnd', 'corePolyStart', 'corePolyEnd', 'mergeStart', 'mergeEnd', 'crownPolyEnd']) {
+  for (const key of ['fillStart', 'fillEnd', 'pruneStart', 'pruneEnd', 'flareStart', 'flareEnd', 'corePolyStart', 'corePolyEnd', 'mergeStart', 'mergeEnd', 'crownPolyEnd']) {
     fStages.add(lodSettings, key, 0, 10, 0.05);
   }
   const fStageParams = fLod.addFolder('stage params').close();
   fStageParams.add(lodSettings, 'cutoffNear', 0, 1, 0.01);
   fStageParams.add(lodSettings, 'cutoffFar', 0, 1, 0.01);
-  fStageParams.add(lodSettings, 'coreScaleNear', 0.3, 1, 0.01);
-  fStageParams.add(lodSettings, 'coreScaleFar', 0.3, 1.05, 0.005);
+  fStageParams.add(lodSettings, 'coreScale', 0.8, 1.05, 0.005);
   fStageParams.add(lodSettings, 'aoInner', 0, 1, 0.01);
   fStageParams.add(lodSettings, 'compensation', 0, 1, 0.01);
   fStageParams.add(lodSettings, 'pruneFade', 0.01, 0.3, 0.01);
@@ -133,6 +132,9 @@ function buildGui() {
   fTree.add(treeParams, 'clusterCount', 3, 30, 1).onFinishChange(rebuild);
   fTree.add(treeParams, 'clusterSize', 0.4, 1.8, 0.01).onFinishChange(rebuild);
   fTree.add(treeParams, 'clusterFlatten', 0.4, 1.2, 0.01).onFinishChange(rebuild);
+  fTree.add(treeParams, 'clusterLobes', 0, 10, 1).onFinishChange(rebuild);
+  fTree.add(treeParams, 'clusterBumps', 0, 1, 0.01).onFinishChange(rebuild);
+  fTree.add(treeParams, 'lobeSharpness', 0.5, 12, 0.1).onFinishChange(rebuild);
   fTree.add(treeParams, 'trunkRadius', 0.1, 0.8, 0.01).onFinishChange(rebuild);
   fTree.add(treeParams, 'limbCount', 1, 7, 1).onFinishChange(rebuild);
   fTree.add(shellParams, 'patchesPerCluster', 6, 80, 1).onFinishChange(rebuild);
@@ -164,6 +166,7 @@ function buildGui() {
   vec(fLook, params.look2, 0, 'patchNormalWeight', 0, 1, 0.01);
   vec(fLook, params.look2, 1, 'mipScale', 0, 1, 0.01);
   vec(fLook, params.look2, 2, 'dissolveFrequency', 0.2, 6, 0.05);
+  vec(fLook, params.look2, 3, 'fillFrequency', 0.2, 6, 0.05);
   vec(fLook, params.shadow, 0, 'selfShadowDensity', 0, 1, 0.01);
   vec(fLook, params.shadow, 1, 'selfShadowSoftness', 0.01, 1, 0.01);
   vec(fLook, params.groundShadow, 0, 'groundShadow', 0, 1, 0.01);
@@ -202,7 +205,7 @@ function updateHud(focus) {
   const fmt = (x, d = 2) => x.toFixed(d);
   const rows = [
     `L ${fmt(e.level)}   crown radius ${fmt(focus.radiusPx, 0)}px   dist ${fmt(focus.distance, 0)}m`,
-    `shell  close ${fmt(e.close)}  flare ${fmt(e.flare)}  patches ${focus.visiblePatches}/${asset.shell.patchCount}  grow ${fmt(e.grow)}`,
+    `shell  fill ${fmt(e.fill)}  flare ${fmt(e.flare)}  patches ${focus.visiblePatches}/${asset.shell.patchCount}  grow ${fmt(e.grow)}`,
     e.crownActive
       ? `crown  level ${e.crownLevel}  morph ${fmt(e.crownMorph)}  dissolve ${fmt(e.dissolve)}`
       : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}  scale ${fmt(e.coreScale, 3)}  merge ${fmt(e.merge)}  dissolve ${fmt(e.dissolve)}`,
