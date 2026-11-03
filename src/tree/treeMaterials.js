@@ -18,6 +18,7 @@ import proxyNormalSrc from '../shaders/proxy_normal.wgsl?raw';
 import shellFarSrc from '../shaders/shell_far.wgsl?raw';
 import shellNormalSrc from '../shaders/shell_normal.wgsl?raw';
 import shellPositionSrc from '../shaders/shell_position.wgsl?raw';
+import shellUvSrc from '../shaders/shell_uv.wgsl?raw';
 import shellWindSrc from '../shaders/shell_wind.wgsl?raw';
 import sunVisibilitySrc from '../shaders/sun_visibility.wgsl?raw';
 import windOffsetSrc from '../shaders/wind_offset.wgsl?raw';
@@ -31,6 +32,7 @@ const fn = (src, includes = []) => wgslFn(src, [common, ...includes]);
 const shellRestPosition = fn(shellPositionSrc);
 const shellFarPosition = fn(shellFarSrc);
 const shellNormalAo = fn(shellNormalSrc);
+const shellPatchUv = fn(shellUvSrc);
 const shellWind = fn(shellWindSrc);
 const coreRestPosition = fn(corePositionSrc);
 const crownRestPosition = fn(crownPositionSrc);
@@ -207,7 +209,7 @@ export function createTreeMaterials(asset, atlases) {
       patchData,
       lodA: I.lodA,
     }));
-    const patchUv = attribute('patchUv', 'vec2');
+    const patchUv = varying(shellPatchUv({ patchUv: attribute('patchUv', 'vec2'), morphUv: attribute('morphUv', 'vec2'), patchData, lodA: I.lodA }));
     const patchEdge = float(1).sub(patchUv.x.mul(patchUv.x.oneMinus()).mul(patchUv.y).mul(patchUv.y.oneMinus()).mul(16));
     const bend = clusterBend({ clusterIndex, ...windArgs });
     const tilt = patchTilt({ patchCenter, patchData, spheres, wind: I.wind, tree: I.tree, windPatch: params.windPatch, lodA: I.lodA });

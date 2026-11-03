@@ -296,11 +296,15 @@ function patchMagnification(cluster, rhombus, i, j, n) {
 // pushed inward (depth) and curled (flare); its leaves stay attached to it, so their size follows
 // the patch's scale times the surface magnification times the depth scale.
 //
-// Each patch is stored once per grid level, from gridSegments segments down to one (patchData.z).
-// A level's vertices geomorph (morph* attributes) onto the next coarser representation evaluated
-// at their own patch coordinates: the grid with one segment fewer, or, from one segment, the core
-// mesh. Every switch therefore happens between identical surfaces. One-segment cells crossed by
-// a core triangle edge are split along that edge so that they can lie flat on the core triangles.
+// Each patch is stored once per grid level, from gridSegments segments down to one (patchData.z),
+// and a level's vertices geomorph (morph* attributes) onto the next coarser representation so that
+// every switch happens between identical meshes. Vertices placed on a coarser surface at their own
+// patch coordinates only match it when the finer triangles do not straddle its creases, which
+// holds for nested grids (two segments into one, one segment onto the core) but not for k into
+// k - 1 segments with k >= 3. There the middle column and row of cells collapse instead: the grid
+// lines on either side move onto one line of the coarser grid, the strip between them degenerates,
+// and every other cell becomes a coarser cell, patch coordinates included. All cells of a patch
+// share one diagonal direction, chosen so that the one-segment cell lies flat on the core triangles.
 function buildShell(tree, field, params, tiling) {
   const rng = new Rng(tree.seed * 7 + 3);
   const n = params.patchDivisions;
@@ -312,7 +316,7 @@ function buildShell(tree, field, params, tiling) {
   for (let k = 1; k <= segments; k++) perPatch += (k + 1) ** 2;
   const w = new AttributeWriter(patchCount * perPatch, {
     position: 3, nearOffset: 3, patchCenter: 4, patchUv: 2, patchData: 4, nPatchAo: 4,
-    morphFar: 3, morphOffset: 3, morphNormalAo: 4,
+    morphFar: 3, morphOffset: 3, morphNormalAo: 4, morphUv: 2,
   });
   const levelIndices = Array.from({ length: segments + 1 }, () => []);
   const topTriangles = RHOMBUS_TRIANGLES[tiling.topLevel];
@@ -373,13 +377,13 @@ function buildShell(tree, field, params, tiling) {
               return cache.get(key);
             });
           }
-          const antiDiagonal = (k) => k === 1 && tiling.topLevel === 1 && i + j === n - 1;
+          const antiDiagonal = tiling.topLevel === 1 && i + j === n - 1;
           const onGrid = (k, su, sv, name) => {
             const cu = Math.min(Math.floor(su * k), k - 1);
             const cv = Math.min(Math.floor(sv * k), k - 1);
             const at = (du, dv) => grids[k][(cv + dv) * (k + 1) + cu + du][name];
             const cellPoints = [[0, 0], [1, 0], [1, 1], [0, 1]];
-            const triangles = antiDiagonal(k) ? [[0, 1, 3], [1, 2, 3]] : [[0, 1, 2], [0, 2, 3]];
+            const triangles = antiDiagonal ? [[0, 1, 3], [1, 2, 3]] : [[0, 1, 2], [0, 2, 3]];
             return interpolateOnTriangles(triangles, cellPoints, [at(0, 0), at(1, 0), at(1, 1), at(0, 1)], su * k - cu, sv * k - cv);
           };
           const patchRadius = Math.max(...grids[segments].map(({ near }) => near.distanceTo(nearCenter)));
@@ -390,8 +394,16 @@ function buildShell(tree, field, params, tiling) {
               const su = (idx % (k + 1)) / k;
               const sv = Math.floor(idx / (k + 1)) / k;
               let target;
-              if (k > 1) {
-                target = ['far', 'offset', 'normal', 'ao'].reduce((t, f) => ({ ...t, [f]: onGrid(k - 1, su, sv, f) }), {});
+              let targetUv = [su, sv];
+              if (k > 2) {
+                const collapsed = Math.floor((k - 1) / 2);
+                const line = (x) => (x <= collapsed ? x : x - 1);
+                const cu = line(idx % (k + 1));
+                const cv = line(Math.floor(idx / (k + 1)));
+                target = grids[k - 1][cv * k + cu];
+                targetUv = [cu / (k - 1), cv / (k - 1)];
+              } else if (k === 2) {
+                target = ['far', 'offset', 'normal', 'ao'].reduce((t, f) => ({ ...t, [f]: onGrid(1, su, sv, f) }), {});
               } else {
                 const U = (i + su) / n;
                 const V = (j + sv) / n;
@@ -412,6 +424,7 @@ function buildShell(tree, field, params, tiling) {
               w.setVector('morphFar', vertex, target.far);
               w.setVector('morphOffset', vertex, target.offset);
               w.setVector('morphNormalAo', vertex, target.normal, target.ao);
+              w.set('morphUv', vertex, ...targetUv);
               vertex++;
             });
             for (let iv = 0; iv < k; iv++) {
@@ -420,7 +433,7 @@ function buildShell(tree, field, params, tiling) {
                 const b = a + 1;
                 const c = a + k + 1;
                 const d = c + 1;
-                const faces = antiDiagonal(k) ? [a, b, c, b, d, c] : [a, b, d, a, d, c];
+                const faces = antiDiagonal ? [a, b, c, b, d, c] : [a, b, d, a, d, c];
                 for (const f of faces) levelIndices[k].push(f);
               }
             }
