@@ -8,12 +8,10 @@ import { defaultTreeParams, generateTree } from './tree/generateTree.js';
 import { createLeafAtlas } from './tree/leafAtlas.js';
 import { defaultLodSettings } from './tree/lod.js';
 import { TreeInstance } from './tree/TreeInstance.js';
-import { createTreeMaterials, disposeTreeMaterials, palette, params } from './tree/treeMaterials.js';
+import { createTreeMaterials, disposeTreeMaterials, palette, params, stylePresets } from './tree/treeMaterials.js';
 
 const hud = document.getElementById('hud');
 
-// alpha-to-coverage writes the fragment alpha into the color target too; an opaque canvas keeps
-// edge alpha from letting the page background show through.
 const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -37,7 +35,7 @@ const treeParams = { ...defaultTreeParams };
 const shellParams = { ...defaultShellParams };
 const lodSettings = { ...defaultLodSettings };
 const env = { sunAzimuth: 140, sunElevation: 38, windStrength: 0.35, windDirection: 20, gust: 0.6, flutter: 0.04, fogDensity: 0.0012 };
-const view = { layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1 };
+const view = { layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft' };
 const leafAtlas = createLeafAtlas();
 
 let asset = null;
@@ -144,6 +142,10 @@ function buildGui() {
   fTree.add(shellParams, 'crownSmooth', 0.05, 3, 0.05).onFinishChange(rebuild);
 
   const fLook = gui.addFolder('Look').close();
+  fLook.add(view, 'style', Object.keys(stylePresets)).onChange((name) => {
+    for (const [key, values] of Object.entries(stylePresets[name])) params[key].value.set(...values);
+    for (const controller of fLook.controllersRecursive()) controller.updateDisplay();
+  });
   const vec = (folder, uniformNode, index, name, min, max, step) => {
     const proxy = {
       get value() {
@@ -167,6 +169,11 @@ function buildGui() {
   vec(fLook, params.look2, 1, 'mipScale', 0, 1, 0.01);
   vec(fLook, params.look2, 2, 'dissolveFrequency', 0.2, 6, 0.05);
   vec(fLook, params.look2, 3, 'fillFrequency', 0.2, 6, 0.05);
+  vec(fLook, params.edge, 0, 'edgeSoftness', 0, 1, 0.01);
+  vec(fLook, params.edge, 1, 'alphaDither', 0, 1, 0.01);
+  vec(fLook, params.tone, 0, 'contrast', 0.2, 1.2, 0.01);
+  vec(fLook, params.tone, 1, 'shadowFloor', 0, 1, 0.01);
+  vec(fLook, params.tone, 2, 'aoStrength', 0, 1, 0.01);
   vec(fLook, params.shadow, 0, 'selfShadowDensity', 0, 1, 0.01);
   vec(fLook, params.shadow, 1, 'selfShadowSoftness', 0.01, 1, 0.01);
   vec(fLook, params.groundShadow, 0, 'groundShadow', 0, 1, 0.01);

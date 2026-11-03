@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { Rng } from '../math.js';
 
-// 2x2 atlas of leaf clumps. Channels: R = coverage (blurred so it can be sharpened with fwidth),
+// 2x2 atlas of leaf clumps. Channels: R = coverage (blurred so its edge can be sharpened with fwidth or kept soft),
 // G = per-leaf random, B = per-leaf brush gradient. G/B are 0.5 outside leaves so mips stay neutral.
 export function createLeafAtlas({ seed = 11, cell = 512, leavesPerClump = 46 } = {}) {
   const size = cell * 2;
@@ -61,7 +61,7 @@ export function createLeafAtlas({ seed = 11, cell = 512, leavesPerClump = 46 } =
   const [alpha, rand, stroke] = layers.map((ctx) => ctx.getImageData(0, 0, size, size).data);
   const coverage = new Float32Array(size * size);
   for (let i = 0; i < size * size; i++) coverage[i] = alpha[i * 4] / 255;
-  const blurred = boxBlur(boxBlur(coverage, size, 2), size, 2);
+  const blurred = boxBlur(boxBlur(boxBlur(coverage, size, 4), size, 4), size, 4);
   const data = new Uint8Array(size * size * 4);
   for (let i = 0; i < size * size; i++) {
     data[i * 4] = Math.round(blurred[i] * 255);

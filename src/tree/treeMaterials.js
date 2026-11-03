@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, float, mix, texture, uniform, uv, varying, vec3, vec4, wgsl, wgslFn } from 'three/tsl';
+import { attribute, float, mix, screenCoordinate, texture, uniform, uv, varying, vec3, vec4, wgsl, wgslFn } from 'three/tsl';
 import commonSrc from '../shaders/common.wgsl?raw';
 import corePositionSrc from '../shaders/core_position.wgsl?raw';
 import crownPositionSrc from '../shaders/crown_position.wgsl?raw';
@@ -54,13 +54,22 @@ export const palette = {
 };
 
 // Packed vec4 layouts must match the `let` unpacking at the top of each WGSL function.
+export const stylePresets = {
+  soft: { ramp: [0.42, 0.66, 0.16, 0.1], edge: [0.6, 0.25, 0, 0], tone: [0.75, 0.4, 0.7, 0] },
+  crisp: { ramp: [0.42, 0.66, 0.05, 0.16], edge: [0, 0, 0, 0], tone: [1, 0.12, 1, 0] },
+};
+
 export const params = {
   // band1, band2, bandSoftness, leafVariation
-  ramp: uniform(new THREE.Vector4(0.42, 0.66, 0.05, 0.16)),
+  ramp: uniform(new THREE.Vector4(0.42, 0.66, 0.16, 0.1)),
   // translucency, edgeBrightness, hueVariation, skyAmbient
   look: uniform(new THREE.Vector4(0.55, 0.08, 0.25, 0.6)),
   // patchNormalWeight, mipScale, dissolveFrequency, fillFrequency
   look2: uniform(new THREE.Vector4(0.35, 0.25, 1.6, 1.8)),
+  // edgeSoftness, alphaDither, -, -
+  edge: uniform(new THREE.Vector4(0.6, 0.25, 0, 0)),
+  // contrast, shadowFloor, aoStrength, -
+  tone: uniform(new THREE.Vector4(0.75, 0.4, 0.7, 0)),
   // density, softness (cluster-to-cluster sun occlusion)
   shadow: uniform(new THREE.Vector4(0.8, 0.35, 0, 0)),
   // strength, breakup, density, softness (ground shadow)
@@ -87,10 +96,18 @@ export const instanceUniforms = {
 
 const meshTint = uniform(new THREE.Vector4()).onObjectUpdate(({ object }) => object.userData.tint);
 
+// Alpha-to-coverage also stores the fragment alpha in the color target, and the sRGB output pass
+// treats that alpha as premultiplied, darkening every soft edge. The blend keeps the destination alpha.
 function foliageMaterial(side) {
   const material = new THREE.MeshBasicNodeMaterial({ side });
   material.alphaToCoverage = true;
   material.fog = false;
+  material.blending = THREE.CustomBlending;
+  material.blendEquation = THREE.AddEquation;
+  material.blendSrc = THREE.OneFactor;
+  material.blendDst = THREE.ZeroFactor;
+  material.blendSrcAlpha = THREE.ZeroFactor;
+  material.blendDstAlpha = THREE.OneFactor;
   return material;
 }
 
@@ -114,7 +131,10 @@ export function createTreeMaterials(asset, leafAtlas) {
     ramp: params.ramp,
     look: params.look,
     look2: params.look2,
+    edge: params.edge,
+    tone: params.tone,
     fog: params.fog,
+    pixel: screenCoordinate,
     cHorizon: palette.horizon,
     cSunHaze: palette.sunHaze,
     tint: meshTint,
@@ -143,7 +163,7 @@ export function createTreeMaterials(asset, leafAtlas) {
       shadeIn: vec4(shadeNear.w, shadeNear.w, 1, 0),
       posLocal: varying(rest),
       sunVis: sunVisibility(rest),
-      leaf: leafSample({ tex: leafTex, samp: leafTex, uv: uv(), cutoff: I.lodD.x, mipScale: params.look2.y, patchRand: patchData.y }),
+      leaf: leafSample({ tex: leafTex, samp: leafTex, uv: uv(), cutoff: I.lodD.x, mipScale: params.look2.y, patchRand: patchData.y, softness: params.edge.x }),
       misc: vec4(patchData.w, patchData.z, 0, 0),
       noisePos: vec3(0),
       solidFill: float(1),
