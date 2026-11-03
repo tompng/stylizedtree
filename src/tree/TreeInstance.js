@@ -92,9 +92,14 @@ export class TreeInstance {
     if (lodSettings.mode === 'auto') level = Math.log2(lodSettings.referencePixels / this.radiusPx) + lodSettings.bias;
     else if (lodSettings.mode === 'manual') level = lodSettings.manualLevel;
     const e = evaluateLod(Math.max(level, 0), lodSettings);
+    const steps = asset.shell.segments;
+    const step = Math.min(Math.floor(e.shellPoly * steps), steps - 1);
+    e.shellLevel = steps - step;
+    e.shellMorph = e.shellPoly * steps - step;
+    e.coreLevel = Math.min(e.coreLevel, asset.core.maxLevel);
     this.lod = e;
 
-    state.lodA.set(e.near, 0, 0, 0);
+    state.lodA.set(e.near, e.shellLevel, e.shellMorph, 0);
     state.lodB.set(1, e.coreLevel, e.coreMorph, e.merge);
     state.lodC.set(e.crownLevel, e.crownMorph, e.merge, 0);
     state.lodD.set(e.cutoff, e.dissolve, e.innerFade, 0);
@@ -102,6 +107,8 @@ export class TreeInstance {
     state.wood.set(1, e.limbScale, e.twigScale, 0);
 
     this.shell.visible = e.shellActive;
+    const shellRange = asset.shell.ranges[e.shellLevel];
+    this.shell.geometry.setDrawRange(shellRange.start, shellRange.count);
 
     const coreRange = asset.core.ranges[e.coreLevel];
     this.core.visible = !e.shellActive && !e.crownActive;

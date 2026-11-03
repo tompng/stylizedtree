@@ -118,7 +118,7 @@ function buildGui() {
   fLod.add(lodSettings, 'bias', -3, 3, 0.01);
   fLod.add(lodSettings, 'referencePixels', 100, 1000, 10);
   const fStages = fLod.addFolder('stage ranges (L)').close();
-  for (const key of ['collapseStart', 'collapseEnd', 'corePolyStart', 'corePolyEnd', 'mergeStart', 'mergeEnd', 'crownPolyEnd']) {
+  for (const key of ['collapseStart', 'collapseEnd', 'shellPolyStart', 'corePolyStart', 'corePolyEnd', 'mergeStart', 'mergeEnd', 'crownPolyEnd']) {
     fStages.add(lodSettings, key, 0, 10, 0.05);
   }
   const fStageParams = fLod.addFolder('stage params').close();
@@ -238,7 +238,7 @@ function updateHud(focus) {
   const rows = [
     `L ${fmt(e.level)}   crown radius ${fmt(focus.radiusPx, 0)}px   dist ${fmt(focus.distance, 0)}m`,
     e.shellActive
-      ? `shell  near ${fmt(e.near)}  patches ${asset.shell.patchCount}  cutoff ${fmt(e.cutoff)}`
+      ? `shell  near ${fmt(e.near)}  grid ${e.shellLevel}  morph ${fmt(e.shellMorph)}  patches ${asset.shell.patchCount}  cutoff ${fmt(e.cutoff)}`
       : e.crownActive
         ? `crown  level ${e.crownLevel}  morph ${fmt(e.crownMorph)}  dissolve ${fmt(e.dissolve)}`
         : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}  merge ${fmt(e.merge)}  dissolve ${fmt(e.dissolve)}`,

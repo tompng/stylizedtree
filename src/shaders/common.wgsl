@@ -64,6 +64,12 @@ fn st_windOffset(anchor: vec3f, wind: vec4f, tree: vec4f) -> vec3f {
   return offset;
 }
 
+// Shell vertices of the drawn grid level (patchData.z == lodA.y) geomorph by lodA.z toward the
+// next coarser representation stored in their morph* attributes.
+fn st_shellMorph(patchData: vec4f, lodA: vec4f) -> f32 {
+  return select(0.0, lodA.z, abs(patchData.z - lodA.y) < 0.5);
+}
+
 // Rotation by rotation vector w (axis * angle), Rodrigues' formula.
 fn st_rotateVector(v: vec3f, w: vec3f) -> vec3f {
   let angle = length(w);

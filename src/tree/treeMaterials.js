@@ -15,6 +15,8 @@ import patchTiltSrc from '../shaders/patch_tilt.wgsl?raw';
 import rotateVectorSrc from '../shaders/rotate_vector.wgsl?raw';
 import shellFadeSrc from '../shaders/shell_fade.wgsl?raw';
 import proxyNormalSrc from '../shaders/proxy_normal.wgsl?raw';
+import shellFarSrc from '../shaders/shell_far.wgsl?raw';
+import shellNormalSrc from '../shaders/shell_normal.wgsl?raw';
 import shellPositionSrc from '../shaders/shell_position.wgsl?raw';
 import shellWindSrc from '../shaders/shell_wind.wgsl?raw';
 import sunVisibilitySrc from '../shaders/sun_visibility.wgsl?raw';
@@ -27,6 +29,8 @@ export const common = wgsl(commonSrc);
 const leafSampleCore = wgsl(leafSampleCoreSrc);
 const fn = (src, includes = []) => wgslFn(src, [common, ...includes]);
 const shellRestPosition = fn(shellPositionSrc);
+const shellFarPosition = fn(shellFarSrc);
+const shellNormalAo = fn(shellNormalSrc);
 const shellWind = fn(shellWindSrc);
 const coreRestPosition = fn(corePositionSrc);
 const crownRestPosition = fn(crownPositionSrc);
@@ -184,11 +188,27 @@ export function createTreeMaterials(asset, atlases) {
   {
     const patchData = attribute('patchData', 'vec4');
     const patchCenter = attribute('patchCenter', 'vec4');
-    const nPatchAo = attribute('nPatchAo', 'vec4');
-    const far = attribute('position', 'vec3');
+    const basePos = attribute('position', 'vec3');
+    const morphFar = attribute('morphFar', 'vec3');
     const clusterIndex = patchData.w;
     const near = I.lodA.x;
-    const rest = shellRestPosition({ basePos: far, nearOffset: attribute('nearOffset', 'vec3'), lodA: I.lodA });
+    const far = shellFarPosition({ basePos, morphFar, patchData, lodA: I.lodA });
+    const rest = shellRestPosition({
+      basePos,
+      nearOffset: attribute('nearOffset', 'vec3'),
+      morphFar,
+      morphOffset: attribute('morphOffset', 'vec3'),
+      patchData,
+      lodA: I.lodA,
+    });
+    const nPatchAo = varying(shellNormalAo({
+      nPatchAo: attribute('nPatchAo', 'vec4'),
+      morphNormalAo: attribute('morphNormalAo', 'vec4'),
+      patchData,
+      lodA: I.lodA,
+    }));
+    const patchUv = attribute('patchUv', 'vec2');
+    const patchEdge = float(1).sub(patchUv.x.mul(patchUv.x.oneMinus()).mul(patchUv.y).mul(patchUv.y.oneMinus()).mul(16));
     const bend = clusterBend({ clusterIndex, ...windArgs });
     const tilt = patchTilt({ patchCenter, patchData, spheres, wind: I.wind, tree: I.tree, windPatch: params.windPatch, lodA: I.lodA });
     shell.positionNode = rest.add(shellWind({ rest, patchCenter, patchData, ...windArgs, bend, tilt }));
@@ -215,7 +235,7 @@ export function createTreeMaterials(asset, atlases) {
         patchRand: mix(float(0.5), patchData.y, near),
         softness: params.edge.x,
         threshold: shellFadeThreshold({
-          patchUv: attribute('patchUv', 'vec2'),
+          patchUv,
           nPatch,
           posLocal: restV,
           camLocal: I.cam,
@@ -224,7 +244,7 @@ export function createTreeMaterials(asset, atlases) {
         }),
         shrink: params.leafShrink,
       }),
-      misc: vec4(clusterIndex, patchData.z.mul(near), 0, 0),
+      misc: vec4(clusterIndex, patchEdge.mul(near), 0, 0),
       noisePos: vec3(0),
       bulkCenter: vec3(0),
     });
