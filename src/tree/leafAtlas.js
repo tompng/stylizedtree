@@ -6,12 +6,17 @@ const DISC = 0.96;
 
 // Leaf patterns per layout. `coverage` is the span of 1 - cos(polar angle) the leaves are spread
 // over (1 = upper hemisphere, 2 = whole sphere) and `halves` the cells each pattern is drawn into.
-// hemispheres: four independent hemispheres; the shell mirrors each onto both halves of a cluster.
-// spheres: two whole spheres, the upper half in cell 2p and the lower half in cell 2p + 1.
+// hemispheres: four independent hemispheres; the shell mirrors each onto both halves of a cluster
+// (`mirrored`). spheres: two whole spheres, the upper half in cell 2p and the lower half in 2p + 1.
 const LAYOUTS = {
-  hemispheres: [0, 1, 2, 3].map((cellIndex) => ({ coverage: 1, halves: [{ cellIndex, sign: 1 }] })),
+  hemispheres: [0, 1, 2, 3].map((cellIndex) => ({
+    coverage: 1,
+    mirrored: true,
+    halves: [{ cellIndex, sign: 1 }],
+  })),
   spheres: [0, 1].map((p) => ({
     coverage: 2,
+    mirrored: false,
     halves: [{ cellIndex: 2 * p, sign: 1 }, { cellIndex: 2 * p + 1, sign: -1 }],
   })),
 };
@@ -28,9 +33,10 @@ export function createLeafAtlas({
   seed = 11,
   cell = 1024,
   layout = 'hemispheres',
-  leafCount = 1300,
+  candidates = 20000,
   leafLength = [0.07, 0.12],
   leafAspect = [0.5, 0.7],
+  gapPixels = 3,
 } = {}) {
   const size = cell * 2;
   const rng = new Rng(seed);
@@ -52,9 +58,11 @@ export function createLeafAtlas({
   }
 
   const R = (cell / 2) * DISC;
-  for (const { coverage, halves } of LAYOUTS[layout]) {
-    const leaves = Array.from({ length: leafCount }, () => {
-      const theta = Math.acos(1 - coverage * rng.next());
+  // The projection never maps a radian to fewer than R / 2 pixels.
+  const gap = gapPixels / (R / 2);
+  for (const pattern of LAYOUTS[layout]) {
+    const pool = Array.from({ length: candidates }, () => {
+      const theta = Math.acos(1 - pattern.coverage * rng.next());
       const phi = rng.next() * Math.PI * 2;
       const length = rng.range(leafLength[0], leafLength[1]);
       return {
@@ -66,8 +74,9 @@ export function createLeafAtlas({
         rand: rng.next(),
       };
     });
+    const leaves = placeApart(pool, { reach: leafLength[1], gap, mirrored: pattern.mirrored });
 
-    for (const { cellIndex, sign } of halves) {
+    for (const { cellIndex, sign } of pattern.halves) {
       const ox = (cellIndex % 2) * cell;
       const oy = Math.floor(cellIndex / 2) * cell;
       // Leaves of the other hemisphere that reach across the equator are drawn as well, through the
@@ -127,6 +136,108 @@ export function createLeafAtlas({
   texture.anisotropy = 8;
   texture.needsUpdate = true;
   return texture;
+}
+
+// Touching leaves would merge into one smooth blob once the coverage is blurred and thresholded,
+// reading as one large leaf. Candidates are placed largest first and dropped when they come within
+// `gap` of a placed leaf, testing each ellipse as the capsule that contains it, on the unit sphere.
+// The shell shows mirrored patterns reflected across the equator, so the reflections of placed
+// leaves count as placed leaves too. A leaf may still overlap its own reflection: keeping it clear
+// of that as well would line the leaves up along the equator with a straight gap between the rows.
+function placeApart(pool, { reach, gap, mirrored }) {
+  const cellSize = reach + gap;
+  const grid = new Map();
+  const keyOf = ([x, y, z]) => `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)},${Math.floor(z / cellSize)}`;
+  const near = (center) => {
+    const [cx, cy, cz] = center.map((v) => Math.floor(v / cellSize));
+    const found = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) found.push(...(grid.get(`${cx + dx},${cy + dy},${cz + dz}`) ?? []));
+      }
+    }
+    return found;
+  };
+  const clear = (a, b) => segmentDistance(a.p0, a.p1, b.p0, b.p1) >= a.radius + b.radius + gap;
+
+  const placed = [];
+  for (const leaf of [...pool].sort((a, b) => b.length - a.length)) {
+    const capsule = leafCapsule(leaf);
+    const probes = mirrored ? [capsule, mirrorCapsule(capsule)] : [capsule];
+    if (!probes.every((probe) => near(probe.center).every((other) => clear(probe, other)))) continue;
+    const key = keyOf(capsule.center);
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(capsule);
+    placed.push(leaf);
+  }
+  return placed;
+}
+
+// Matches the drawing frame: the leaf's long axis is cos(heading) along +theta (away from the
+// pole) plus sin(heading) along +phi.
+function leafCapsule({ theta, phi, heading, length, width }) {
+  const st = Math.sin(theta);
+  const ct = Math.cos(theta);
+  const sp = Math.sin(phi);
+  const cp = Math.cos(phi);
+  const center = [st * cp, ct, st * sp];
+  const ch = Math.cos(heading);
+  const sh = Math.sin(heading);
+  const axis = [ch * ct * cp - sh * sp, -ch * st, ch * ct * sp + sh * cp];
+  const radius = width / 2;
+  const half = Math.max(length / 2 - radius, 0);
+  return {
+    center,
+    radius,
+    p0: center.map((c, i) => c - axis[i] * half),
+    p1: center.map((c, i) => c + axis[i] * half),
+  };
+}
+
+function mirrorCapsule({ center, radius, p0, p1 }) {
+  const flip = ([x, y, z]) => [x, -y, z];
+  return { center: flip(center), radius, p0: flip(p0), p1: flip(p1) };
+}
+
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const clamp01 = (x) => Math.min(Math.max(x, 0), 1);
+
+// Closest distance between segments p0-p1 and q0-q1 (Ericson, Real-Time Collision Detection 5.1.9).
+function segmentDistance(p0, p1, q0, q1) {
+  const d1 = sub(p1, p0);
+  const d2 = sub(q1, q0);
+  const r = sub(p0, q0);
+  const a = dot(d1, d1);
+  const e = dot(d2, d2);
+  const f = dot(d2, r);
+  let s = 0;
+  let t = 0;
+  if (a < 1e-12 && e < 1e-12) {
+    s = 0;
+    t = 0;
+  } else if (a < 1e-12) {
+    t = clamp01(f / e);
+  } else {
+    const c = dot(d1, r);
+    if (e < 1e-12) {
+      s = clamp01(-c / a);
+    } else {
+      const b = dot(d1, d2);
+      const denom = a * e - b * b;
+      s = denom > 1e-12 ? clamp01((b * f - c * e) / denom) : 0;
+      t = (b * s + f) / e;
+      if (t < 0) {
+        t = 0;
+        s = clamp01(-c / a);
+      } else if (t > 1) {
+        t = 1;
+        s = clamp01((b - c) / a);
+      }
+    }
+  }
+  const diff = [0, 1, 2].map((i) => p0[i] + d1[i] * s - (q0[i] + d2[i] * t));
+  return Math.sqrt(dot(diff, diff));
 }
 
 const gray = (t) => {
