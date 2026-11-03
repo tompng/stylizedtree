@@ -35,6 +35,7 @@ export function evaluateLod(level, s) {
     coreLevel: coreT >= 1 ? 1 : 2,
     coreMorph: coreT >= 1 ? 0 : coreT,
     merge,
+    innerFade: clamp(merge * 2, 0, 1),
     crownActive: level >= s.mergeEnd,
     crownLevel: 2 - crownStep,
     crownMorph: crownT - crownStep,

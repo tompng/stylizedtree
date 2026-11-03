@@ -6,7 +6,10 @@ import crownPositionSrc from '../shaders/crown_position.wgsl?raw';
 import decalPositionSrc from '../shaders/decal_position.wgsl?raw';
 import decalShadeSrc from '../shaders/decal_shade.wgsl?raw';
 import foliageShadeSrc from '../shaders/foliage_shade.wgsl?raw';
+import innerFadeSrc from '../shaders/inner_fade.wgsl?raw';
+import innerLeafSrc from '../shaders/inner_leaf.wgsl?raw';
 import leafSampleSrc from '../shaders/leaf_sample.wgsl?raw';
+import leafSampleCoreSrc from '../shaders/leaf_sample_core.wgsl?raw';
 import leafUvSrc from '../shaders/leaf_uv.wgsl?raw';
 import shellFadeSrc from '../shaders/shell_fade.wgsl?raw';
 import proxyNormalSrc from '../shaders/proxy_normal.wgsl?raw';
@@ -18,7 +21,8 @@ import woodPositionSrc from '../shaders/wood_position.wgsl?raw';
 import woodShadeSrc from '../shaders/wood_shade.wgsl?raw';
 
 export const common = wgsl(commonSrc);
-const fn = (src) => wgslFn(src, [common]);
+const leafSampleCore = wgsl(leafSampleCoreSrc);
+const fn = (src, includes = []) => wgslFn(src, [common, ...includes]);
 const shellRestPosition = fn(shellPositionSrc);
 const shellWind = fn(shellWindSrc);
 const coreRestPosition = fn(corePositionSrc);
@@ -28,7 +32,9 @@ const windOffsetAt = fn(windOffsetSrc);
 const decalPosition = fn(decalPositionSrc);
 const sunVisibilityAt = fn(sunVisibilitySrc);
 const proxyNormal = fn(proxyNormalSrc);
-const leafSample = fn(leafSampleSrc);
+const leafSample = fn(leafSampleSrc, [leafSampleCore]);
+const innerLeafSample = fn(innerLeafSrc, [leafSampleCore]);
+const innerFadeThreshold = fn(innerFadeSrc);
 const leafUv = fn(leafUvSrc);
 const shellFadeThreshold = fn(shellFadeSrc);
 const foliageShade = fn(foliageShadeSrc);
@@ -76,6 +82,8 @@ export const params = {
   patchFade: uniform(new THREE.Vector4(0.15, 1, 1, 0)),
   // per-leaf variation of the shrink threshold, shrink softness
   leafShrink: uniform(new THREE.Vector4(0.5, 0.15, 0, 0)),
+  // shade (AO of the inner shade-leaf ball), rimWidth, thin, -
+  inner: uniform(new THREE.Vector4(0.1, 0.8, 0.05, 0)),
   // contrast, shadowFloor, aoStrength, depthShade (AO of the deepest shell patches)
   tone: uniform(new THREE.Vector4(0.75, 0.4, 0.7, 0.65)),
   // density, softness (cluster-to-cluster sun occlusion)
@@ -121,12 +129,13 @@ function foliageMaterial(side) {
 
 // Shading, noise and shadows use the rest position (all LOD morphs, no wind) so that the
 // pattern rides along with the swaying vertices instead of sliding across them.
-export function createTreeMaterials(asset, leafAtlas) {
+export function createTreeMaterials(asset, atlases) {
   const I = instanceUniforms;
   const spheres = texture(asset.sphereTexture);
   const counts = uniform(asset.counts);
   const crownInfo = uniform(asset.crownInfo);
-  const leafTex = texture(leafAtlas);
+  const leafTex = texture(atlases.leaf);
+  const innerTex = texture(atlases.inner);
   const shadeArgs = {
     camLocal: I.cam,
     sun: I.sun,
@@ -237,6 +246,43 @@ export function createTreeMaterials(asset, leafAtlas) {
     });
   }
 
+  const inner = foliageMaterial(THREE.DoubleSide);
+  {
+    const cCenter = attribute('cCenter', 'vec4');
+    const center = cCenter.xyz;
+    const clusterIndex = cCenter.w;
+    const rest = attribute('position', 'vec3');
+    inner.positionNode = rest.add(windAt(center, clusterIndex, float(1)));
+    const restV = varying(rest);
+    const nProxy = proxyNormal({ p: restV, clusterIndex, merge: float(0), spheres, counts });
+    const shade = params.inner.x;
+    inner.colorNode = foliageShade({
+      ...shadeArgs,
+      nProxy,
+      nDetail: vec4(0),
+      shadeIn: vec4(shade, shade, 1, 0),
+      posLocal: restV,
+      sunVis: sunVisibility(rest),
+      leaf: innerLeafSample({
+        tex: innerTex,
+        samp: innerTex,
+        p: restV,
+        clusterIndex,
+        spheres,
+        cutoff: I.lodD.x,
+        mipScale: params.look2.y,
+        // Differs from the core's 0.5 so their alpha-to-coverage dither does not line up.
+        patchRand: float(0.45),
+        softness: params.edge.x,
+        threshold: innerFadeThreshold({ nProxy, posLocal: restV, center: varying(center), camLocal: I.cam, inner: params.inner, lodD: I.lodD }),
+        shrink: params.leafShrink,
+      }),
+      misc: vec4(clusterIndex, 0, 0, 0),
+      noisePos: vec3(0),
+      bulkCenter: vec3(0),
+    });
+  }
+
   const crown = foliageMaterial(THREE.FrontSide);
   {
     const pos = attribute('position', 'vec3');
@@ -317,7 +363,7 @@ export function createTreeMaterials(asset, leafAtlas) {
     });
   }
 
-  return { shell, core, crown, wood, decal };
+  return { shell, core, inner, crown, wood, decal };
 }
 
 export function disposeTreeMaterials(materials) {

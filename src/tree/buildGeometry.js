@@ -54,6 +54,7 @@ export function buildTreeAsset(tree, shellParams) {
     counts: new THREE.Vector4(tree.clusters.length, tree.woodChains.length, shellParams.crownSmooth, tree.clusters[0].shape.lobes.length),
     crownInfo: new THREE.Vector4(tree.crownCenter.x, tree.crownCenter.y, tree.crownCenter.z, Math.max(tree.crownRadii.x, tree.crownRadii.z)),
     core: buildCore(tree, field),
+    inner: buildInner(tree, shellParams),
     shell: buildShell(tree, field, shellParams),
     crown: buildCrown(field),
     wood: buildWood(tree, field),
@@ -62,7 +63,7 @@ export function buildTreeAsset(tree, shellParams) {
 
 export function disposeTreeAsset(asset) {
   asset.sphereTexture.dispose();
-  for (const part of [asset.core, asset.shell, asset.crown, asset.wood]) part.geometry.dispose();
+  for (const part of [asset.core, asset.inner, asset.shell, asset.crown, asset.wood]) part.geometry.dispose();
 }
 
 // Rows: 0 = center + shadow radius (0 casts no shadow), 1 = wood chain points, 2 = axes,
@@ -132,6 +133,24 @@ function buildCore(tree, field) {
   });
   const { indices, ranges } = levelRanges(CORE_MAX_LEVEL, clusters.length, perCluster, ico.levels);
   return { geometry: w.toGeometry(indices), ranges };
+}
+
+// Sits at the deepest shell layer, where the shell's depth offset pushes patches to.
+function buildInner(tree, params) {
+  const ico = buildIcosphere(CORE_MAX_LEVEL);
+  const perCluster = ico.dirs.length;
+  const clusters = tree.clusters.slice(0, tree.leafClusterCount);
+  const w = new AttributeWriter(clusters.length * perCluster, { position: 3, cCenter: 4 });
+  clusters.forEach((cluster, ci) => {
+    ico.dirs.forEach((dir, vi) => {
+      const index = ci * perCluster + vi;
+      w.setVector('position', index, clusterSurfacePoint(cluster, dir, 1 - params.depth));
+      w.setVector('cCenter', index, cluster.center, ci);
+    });
+  });
+  const faces = ico.levels[CORE_MAX_LEVEL];
+  const indices = clusters.flatMap((_, ci) => faces.map((v) => ci * perCluster + v));
+  return { geometry: w.toGeometry(indices) };
 }
 
 function buildCrown(field) {

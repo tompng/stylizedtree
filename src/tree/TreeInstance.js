@@ -5,6 +5,7 @@ import { evaluateLod } from './lod.js';
 const TINTS = {
   shell: [0.95, 0.35, 0.3],
   core: [0.3, 0.85, 0.35],
+  inner: [0.95, 0.8, 0.25],
   crown: [0.3, 0.45, 0.95],
   wood: [0, 0, 0],
 };
@@ -43,6 +44,7 @@ export class TreeInstance {
     };
     this.shell = this.addMesh(shareGeometry(asset.shell.geometry), materials.shell, 'shell');
     this.core = this.addMesh(shareGeometry(asset.core.geometry), materials.core, 'core');
+    this.inner = this.addMesh(shareGeometry(asset.inner.geometry), materials.inner, 'inner');
     this.crown = this.addMesh(shareGeometry(asset.crown.geometry), materials.crown, 'crown');
     this.wood = this.addMesh(shareGeometry(asset.wood.geometry), materials.wood, 'wood');
     this.decal = this.addMesh(decalGeometry, materials.decal, 'wood');
@@ -63,10 +65,10 @@ export class TreeInstance {
   }
 
   dispose() {
-    for (const mesh of [this.shell, this.core, this.crown, this.wood]) mesh.geometry.dispose();
+    for (const mesh of [this.shell, this.core, this.inner, this.crown, this.wood]) mesh.geometry.dispose();
   }
 
-  update({ camera, viewportHeight, lodSettings, sunWorld, wind, time, tintAmount }) {
+  update({ camera, viewportHeight, lodSettings, sunWorld, wind, time, tintAmount, showInner }) {
     const { asset, state } = this;
     this.group.updateMatrixWorld();
     inverse.copy(this.group.matrixWorld).invert();
@@ -93,7 +95,7 @@ export class TreeInstance {
     state.lodA.set(e.near, 0, 0, 0);
     state.lodB.set(1, e.coreLevel, e.coreMorph, e.merge);
     state.lodC.set(e.crownLevel, e.crownMorph, e.merge, 0);
-    state.lodD.set(e.cutoff, e.dissolve, 0, 0);
+    state.lodD.set(e.cutoff, e.dissolve, e.innerFade, 0);
     state.wood.set(1, e.limbScale, e.twigScale, 0);
 
     this.shell.visible = e.shellActive;
@@ -102,6 +104,8 @@ export class TreeInstance {
     this.core.visible = !e.shellActive && !e.crownActive;
     this.core.geometry.setDrawRange(coreRange.start, coreRange.count);
 
+    this.inner.visible = showInner && e.innerFade < 1;
+
     const crownRange = asset.crown.ranges[e.crownLevel];
     this.crown.visible = e.crownActive;
     this.crown.geometry.setDrawRange(crownRange.start, crownRange.count);
@@ -109,7 +113,7 @@ export class TreeInstance {
     const woodLevel = e.twigScale > 0 ? 2 : e.limbScale > 0 ? 1 : 0;
     this.wood.geometry.setDrawRange(0, asset.wood.countUpToLevel[woodLevel]);
 
-    for (const mesh of [this.shell, this.core, this.crown]) mesh.userData.tint.w = tintAmount;
+    for (const mesh of [this.shell, this.core, this.inner, this.crown]) mesh.userData.tint.w = tintAmount;
     this.updateDecal();
   }
 

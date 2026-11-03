@@ -1,10 +1,22 @@
 import * as THREE from 'three/webgpu';
 import { Rng } from '../math.js';
 
-// Disc radius inside each atlas cell. Must match the 0.96 in leaf_uv.wgsl.
+// Disc radius inside each atlas cell. Must match the 0.96 in leaf_uv.wgsl and inner_leaf.wgsl.
 const DISC = 0.96;
 
-// 2x2 atlas. Each cell is one cluster hemisphere in Lambert azimuthal equal-area projection
+// Leaf patterns per layout. `coverage` is the span of 1 - cos(polar angle) the leaves are spread
+// over (1 = upper hemisphere, 2 = whole sphere) and `halves` the cells each pattern is drawn into.
+// hemispheres: four independent hemispheres; the shell mirrors each onto both halves of a cluster.
+// spheres: two whole spheres, the upper half in cell 2p and the lower half in cell 2p + 1.
+const LAYOUTS = {
+  hemispheres: [0, 1, 2, 3].map((cellIndex) => ({ coverage: 1, halves: [{ cellIndex, sign: 1 }] })),
+  spheres: [0, 1].map((p) => ({
+    coverage: 2,
+    halves: [{ cellIndex: 2 * p, sign: 1 }, { cellIndex: 2 * p + 1, sign: -1 }],
+  })),
+};
+
+// 2x2 atlas. Each cell is one hemisphere in Lambert azimuthal equal-area projection
 // (leaf_uv.wgsl), so leaves placed uniformly in the disc are uniform on the sphere. Each leaf is
 // drawn through the projection's Jacobian at its position so it keeps its shape on the sphere.
 // Channels: R = coverage (blurred so its edge can be sharpened with fwidth or kept soft),
@@ -15,7 +27,8 @@ const DISC = 0.96;
 export function createLeafAtlas({
   seed = 11,
   cell = 1024,
-  leavesPerHemisphere = 1300,
+  layout = 'hemispheres',
+  leafCount = 1300,
   leafLength = [0.07, 0.12],
   leafAspect = [0.5, 0.7],
 } = {}) {
@@ -38,46 +51,61 @@ export function createLeafAtlas({
     ctx.fillRect(0, 0, size, size);
   }
 
-  for (let cellIndex = 0; cellIndex < 4; cellIndex++) {
-    const ox = (cellIndex % 2) * cell;
-    const oy = Math.floor(cellIndex / 2) * cell;
-    const R = (cell / 2) * DISC;
-    const leaves = [];
-    for (let i = 0; i < leavesPerHemisphere; i++) {
-      const rho = Math.sqrt(rng.next());
+  const R = (cell / 2) * DISC;
+  for (const { coverage, halves } of LAYOUTS[layout]) {
+    const leaves = Array.from({ length: leafCount }, () => {
+      const theta = Math.acos(1 - coverage * rng.next());
       const phi = rng.next() * Math.PI * 2;
-      const theta = 2 * Math.asin(rho / Math.SQRT2);
       const length = rng.range(leafLength[0], leafLength[1]);
-      leaves.push({
-        x: ox + cell / 2 + R * rho * Math.cos(phi),
-        y: oy + cell / 2 + R * rho * Math.sin(phi),
+      return {
+        theta,
         phi,
-        radialScale: R * Math.SQRT1_2 * Math.cos(theta / 2),
-        tangentialScale: R * (theta > 1e-4 ? rho / Math.sin(theta) : Math.SQRT1_2),
-        heading: rng.next() * Math.PI * 2,
         length,
+        heading: rng.next() * Math.PI * 2,
         width: length * rng.range(leafAspect[0], leafAspect[1]),
         rand: rng.next(),
-      });
-    }
+      };
+    });
 
-    for (const ctx of layers) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(ox, oy, cell, cell);
-      ctx.clip();
+    for (const { cellIndex, sign } of halves) {
+      const ox = (cellIndex % 2) * cell;
+      const oy = Math.floor(cellIndex / 2) * cell;
+      // Leaves of the other hemisphere that reach across the equator are drawn as well, through the
+      // projection continued past the equator, so the two cells agree along it. Seen from the lower
+      // pole the radial direction points north, so headings mirror to keep each leaf's 3D direction.
+      const placed = [];
+      for (const leaf of leaves) {
+        const theta = sign > 0 ? leaf.theta : Math.PI - leaf.theta;
+        if (theta > Math.PI / 2 + leafLength[1]) continue;
+        const rho = Math.SQRT2 * Math.sin(theta / 2);
+        placed.push({
+          ...leaf,
+          x: ox + cell / 2 + R * rho * Math.cos(leaf.phi),
+          y: oy + cell / 2 + R * rho * Math.sin(leaf.phi),
+          radialScale: R * Math.SQRT1_2 * Math.cos(theta / 2),
+          tangentialScale: R * (theta > 1e-4 ? rho / Math.sin(theta) : Math.SQRT1_2),
+          heading: sign > 0 ? leaf.heading : Math.PI - leaf.heading,
+        });
+      }
+
+      for (const ctx of layers) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(ox, oy, cell, cell);
+        ctx.clip();
+      }
+      const dilate = 8 / (R * 0.6);
+      for (const leaf of placed) {
+        withLeafFrame(randCtx, leaf, () => {
+          leafPath(randCtx, leaf.length, leaf.width);
+          randCtx.lineWidth = dilate;
+          randCtx.strokeStyle = gray(leaf.rand);
+          randCtx.stroke();
+        });
+      }
+      for (const leaf of placed) drawLeaf(layers, leaf);
+      for (const ctx of layers) ctx.restore();
     }
-    const dilate = 8 / (R * 0.6);
-    for (const leaf of leaves) {
-      withLeafFrame(randCtx, leaf, () => {
-        leafPath(randCtx, leaf.length, leaf.width);
-        randCtx.lineWidth = dilate;
-        randCtx.strokeStyle = gray(leaf.rand);
-        randCtx.stroke();
-      });
-    }
-    for (const leaf of leaves) drawLeaf(layers, leaf);
-    for (const ctx of layers) ctx.restore();
   }
 
   const [alpha, rand, stroke, core] = layers.map((ctx) => ctx.getImageData(0, 0, size, size).data);

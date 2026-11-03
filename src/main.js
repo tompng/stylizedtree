@@ -35,8 +35,11 @@ const treeParams = { ...defaultTreeParams };
 const shellParams = { ...defaultShellParams };
 const lodSettings = { ...defaultLodSettings };
 const env = { sunAzimuth: 140, sunElevation: 38, windStrength: 0.35, windDirection: 20, gust: 0.6, flutter: 0.04, fogDensity: 0.0012 };
-const view = { layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft' };
-const leafAtlas = createLeafAtlas();
+const view = { layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft', innerBall: true };
+const atlases = {
+  leaf: createLeafAtlas(),
+  inner: createLeafAtlas({ seed: 23, cell: 512, layout: 'spheres', leafCount: 1100, leafLength: [0.13, 0.22] }),
+};
 
 let asset = null;
 let materials = null;
@@ -68,7 +71,7 @@ function rebuild() {
   if (asset) disposeTreeAsset(asset);
   if (materials) disposeTreeMaterials(materials);
   asset = buildTreeAsset(generateTree(treeParams), shellParams);
-  materials = createTreeMaterials(asset, leafAtlas);
+  materials = createTreeMaterials(asset, atlases);
   trees = layoutTransforms(view.layout).map(({ x, z, rotation }, i) => {
     const tree = new TreeInstance(asset, materials);
     tree.group.position.set(x, 0, z);
@@ -172,6 +175,10 @@ function buildGui() {
   vec(fLook, params.patchFade, 2, 'grazingFade', 0, 1, 0.01);
   vec(fLook, params.leafShrink, 0, 'shrinkLeafVariation', 0, 1, 0.01);
   vec(fLook, params.leafShrink, 1, 'shrinkSoftness', 0.01, 0.5, 0.01);
+  fLook.add(view, 'innerBall');
+  vec(fLook, params.inner, 0, 'innerShade', 0, 1, 0.01);
+  vec(fLook, params.inner, 1, 'innerRimWidth', 0.05, 1, 0.01);
+  vec(fLook, params.inner, 2, 'innerThin', 0, 1, 0.01);
   vec(fLook, params.tone, 0, 'contrast', 0.2, 1.2, 0.01);
   vec(fLook, params.tone, 1, 'shadowFloor', 0, 1, 0.01);
   vec(fLook, params.tone, 2, 'aoStrength', 0, 1, 0.01);
@@ -253,6 +260,7 @@ function frame() {
     wind: { strength: env.windStrength, direction: THREE.MathUtils.degToRad(env.windDirection), gust: env.gust, flutter: env.flutter },
     time: elapsed,
     tintAmount: view.tint,
+    showInner: view.innerBall,
   };
   for (const tree of trees) tree.update(ctx);
 
