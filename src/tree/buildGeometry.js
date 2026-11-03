@@ -7,13 +7,13 @@ import { buildIcosphere } from './icosphere.js';
 export const defaultShellParams = {
   patchDivisions: 2,
   overlap: 4,
-  flare: 0.4,
+  flare: 0.6,
   // outward, inward (each patch curls toward the cluster center), or random (either, per patch)
   flareDirection: 'outward',
-  depth: 0.35,
+  depth: 0.2,
   // Scales each patch so its leaves come out the size of an average patch's (average surface
   // magnification at the average depth).
-  leafSizeCompensation: false,
+  leafSizeCompensation: true,
   gridSegments: 3,
   crownSmooth: 1.0,
 };

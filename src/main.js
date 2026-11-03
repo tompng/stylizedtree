@@ -136,7 +136,7 @@ function buildGui() {
   fTree.add(treeParams, 'limbCount', 1, 7, 1).onFinishChange(rebuild);
   fTree.add(shellParams, 'patchDivisions', 1, 3, 1).onFinishChange(rebuild);
   fTree.add(shellParams, 'overlap', 1, 5, 0.05).onFinishChange(rebuild);
-  fTree.add(shellParams, 'flare', 0, 0.6, 0.01).onFinishChange(rebuild);
+  fTree.add(shellParams, 'flare', 0, 1, 0.01).onFinishChange(rebuild);
   fTree.add(shellParams, 'flareDirection', ['outward', 'inward', 'random']).onFinishChange(rebuild);
   fTree.add(shellParams, 'depth', 0, 0.8, 0.01).onFinishChange(rebuild);
   fTree.add(shellParams, 'leafSizeCompensation').onFinishChange(rebuild);
