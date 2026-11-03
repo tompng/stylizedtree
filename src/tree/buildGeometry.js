@@ -11,6 +11,9 @@ export const defaultShellParams = {
   // outward, inward (each patch curls toward the cluster center), or random (either, per patch)
   flareDirection: 'outward',
   depth: 0.35,
+  // Scales each patch so its leaves come out the size of an average patch's (average surface
+  // magnification at the average depth).
+  leafSizeCompensation: false,
   gridSegments: 3,
   crownSmooth: 1.0,
 };
@@ -220,10 +223,29 @@ function rhombusPoint([c00, c10, c11, c01], u, v) {
     .normalize();
 }
 
+// Linear scale from the leaf atlas (directions on the unit sphere) to the cluster surface over one
+// patch: lobes and the ellipsoid axes enlarge or shrink the leaves drawn there.
+function patchMagnification(cluster, rhombus, i, j, n) {
+  const k = 4;
+  const sample = (u, v) => rhombusPoint(rhombus, (i + u / k) / n, (j + v / k) / n);
+  const quadArea = (p00, p10, p01, p11) => p11.clone().sub(p00).cross(p01.clone().sub(p10)).length() / 2;
+  let sphereArea = 0;
+  let surfaceArea = 0;
+  for (let v = 0; v < k; v++) {
+    for (let u = 0; u < k; u++) {
+      const dirs = [sample(u, v), sample(u + 1, v), sample(u, v + 1), sample(u + 1, v + 1)];
+      sphereArea += quadArea(...dirs);
+      surfaceArea += quadArea(...dirs.map((d) => clusterSurfacePoint(cluster, d)));
+    }
+  }
+  return Math.sqrt(surfaceArea / sphereArea);
+}
+
 // At rest (near offset 0) the patches tile each cluster surface exactly, edge to edge, and every
 // fragment looks up the leaf atlas from its own surface direction, so the tiled shell and the
 // core mesh show the same leaves. Up close each patch is scaled up around its center (overlap),
-// pushed inward (depth) and curled outward (flare); its leaves stay attached to it.
+// pushed inward (depth) and curled (flare); its leaves stay attached to it, so their size follows
+// the patch's scale times the surface magnification times the depth scale.
 function buildShell(tree, field, params) {
   const rng = new Rng(tree.seed * 7 + 3);
   const rhombi = triacontahedronRhombi();
@@ -244,12 +266,20 @@ function buildShell(tree, field, params) {
   leafClusters.forEach((cluster, ci) => {
     const rotation = new THREE.Quaternion().setFromAxisAngle(rng.unitVector(), rng.next() * Math.PI * 2);
     const corners = rhombi.map((r) => r.map((d) => d.clone().applyQuaternion(rotation)));
-    for (const rhombus of corners) {
+    const magnifications = corners.map((rhombus) =>
+      Array.from({ length: n * n }, (_, k) => patchMagnification(cluster, rhombus, k % n, Math.floor(k / n), n)));
+    const meanMagnification = magnifications.flat().reduce((sum, m) => sum + m, 0) / (corners.length * n * n);
+    corners.forEach((rhombus, ri) => {
       for (let j = 0; j < n; j++) {
         for (let i = 0; i < n; i++) {
           const depth = rng.next();
           const nearScale = 1 - params.depth * depth;
-          const grow = scale * rng.range(0.9, 1.1);
+          let grow = scale * rng.range(0.9, 1.1);
+          if (params.leafSizeCompensation) {
+            const compensation = (meanMagnification / magnifications[ri][j * n + i]) * ((1 - params.depth / 2) / nearScale);
+            // Below 1 the scaled patches would no longer cover the surface between them.
+            grow = Math.min(Math.max(grow * compensation, 1), grow * 2);
+          }
           const flare = params.flare * rng.range(0.7, 1.3);
           const rand = rng.next();
           const flip = rng.next() < 0.5;
@@ -310,7 +340,7 @@ function buildShell(tree, field, params) {
           pi++;
         }
       }
-    }
+    });
   });
   const geometry = w.toGeometry(indices);
   geometry.boundingSphere.radius += maxOffset;
