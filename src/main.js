@@ -177,7 +177,7 @@ function buildGui() {
   vec(fLook, params.look, 2, 'hueVariation', 0, 1, 0.01);
   vec(fLook, params.look, 3, 'skyAmbient', 0, 1, 0.01);
   vec(fLook, params.look2, 0, 'patchNormalWeight', 0, 1, 0.01);
-  vec(fLook, params.look2, 1, 'mipScale', 0, 1, 0.01);
+  vec(fLook, params.look2, 1, 'farDensity', 0, 2, 0.01);
   vec(fLook, params.look2, 2, 'dissolveFrequency', 0.2, 6, 0.05);
   vec(fLook, params.edge, 0, 'edgeSoftness', 0, 1, 0.01);
   vec(fLook, params.edge, 1, 'alphaDither', 0, 1, 0.01);
@@ -278,6 +278,7 @@ function frame() {
     time: elapsed,
     tintAmount: view.tint,
     showInner: view.innerBall,
+    atlases,
   };
   for (const tree of trees) tree.update(ctx);
 

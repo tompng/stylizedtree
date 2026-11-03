@@ -80,8 +80,8 @@ export const params = {
   ramp: uniform(new THREE.Vector4(0.42, 0.66, 0.16, 0.1)),
   // translucency, edgeBrightness, hueVariation, skyAmbient
   look: uniform(new THREE.Vector4(0.55, 0.08, 0.25, 0.6)),
-  // patchNormalWeight, mipScale, dissolveFrequency, -
-  look2: uniform(new THREE.Vector4(0.35, 0.25, 1.6, 0)),
+  // patchNormalWeight, farDensity (scales leaf opacity once pixels span several leaves), dissolveFrequency, -
+  look2: uniform(new THREE.Vector4(0.35, 1, 1.6, 0)),
   // edgeSoftness, alphaDither, -, -
   edge: uniform(new THREE.Vector4(0.6, 0.25, 0, 0)),
   // start (1 - bump where leaves start shrinking), strength, grazing (edge-on patches), -
@@ -116,6 +116,8 @@ export const instanceUniforms = {
   lodB: perInstance('lodB', new THREE.Vector4(0.8, 2, 0, 0)),
   lodC: perInstance('lodC', new THREE.Vector4(2, 0, 0, 0)),
   lodD: perInstance('lodD', new THREE.Vector4(0.5, 0, 0, 0)),
+  // farCoverageScale of the shell and inner atlases at the instance's cutoff
+  farLeaf: perInstance('farLeaf', new THREE.Vector4(1, 1, 0, 0)),
   wood: perInstance('wood', new THREE.Vector4(1, 1, 1, 0)),
   decal: perInstance('decal', new THREE.Vector4(0, 0, 1, 1)),
 };
@@ -146,6 +148,13 @@ export function createTreeMaterials(asset, atlases) {
   const crownInfo = uniform(asset.crownInfo);
   const leafTex = texture(atlases.leaf);
   const innerTex = texture(atlases.inner);
+  // Leaves stay sharp until the pixel footprint nears their width, then turn into averaged coverage.
+  const farParams = (atlas, scale) => {
+    const mip = Math.log2(atlas.userData.leafWidthTexels);
+    return vec4(scale.mul(params.look2.y), mip - 1, mip + 1, 0);
+  };
+  const leafFar = farParams(atlases.leaf, I.farLeaf.x);
+  const innerFar = farParams(atlases.inner, I.farLeaf.y);
   const shadeArgs = {
     camLocal: I.cam,
     sun: I.sun,
@@ -202,7 +211,7 @@ export function createTreeMaterials(asset, atlases) {
         clusterIndex,
         spheres,
         cutoff: I.lodD.x,
-        mipScale: params.look2.y,
+        far: leafFar,
         patchRand: mix(float(0.5), patchData.y, near),
         softness: params.edge.x,
         threshold: shellFadeThreshold({
@@ -248,7 +257,7 @@ export function createTreeMaterials(asset, atlases) {
       clusterIndex: coreData.y,
       spheres,
       cutoff: I.lodD.x,
-      mipScale: params.look2.y,
+      far: leafFar,
       patchRand: float(0.5),
       softness: params.edge.x,
       threshold: float(0),
@@ -294,7 +303,7 @@ export function createTreeMaterials(asset, atlases) {
         clusterIndex,
         spheres,
         cutoff: I.lodD.x,
-        mipScale: params.look2.y,
+        far: innerFar,
         // Differs from the core's 0.5 so their alpha-to-coverage dither does not line up.
         patchRand: float(0.45),
         softness: params.edge.x,

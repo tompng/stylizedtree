@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { Rng } from '../math.js';
+import { Rng, clamp, lerp } from '../math.js';
 
 // Disc radius inside each atlas cell. Must match the 0.96 in leaf_sphere_sample.wgsl.
 const DISC = 0.96;
@@ -45,6 +45,7 @@ export function createLeafAtlas({
   // The projection never maps a radian to fewer than R / 2 pixels.
   const gap = gapPixels / (R / 2);
   const leafCounts = [];
+  let widthSum = 0;
   for (let pattern = 0; pattern < 2; pattern++) {
     const pool = Array.from({ length: candidates }, () => {
       const theta = Math.acos(1 - 2 * rng.next());
@@ -61,6 +62,7 @@ export function createLeafAtlas({
     });
     const leaves = placeApart(pool, { reach: leafLength[1], gap });
     leafCounts.push(leaves.length);
+    for (const leaf of leaves) widthSum += leaf.width;
 
     for (const sign of [1, -1]) {
       const cellIndex = 2 * pattern + (sign > 0 ? 0 : 1);
@@ -122,8 +124,42 @@ export function createLeafAtlas({
   texture.magFilter = THREE.LinearFilter;
   texture.anisotropy = 8;
   texture.needsUpdate = true;
-  texture.userData.leafCounts = leafCounts;
+  texture.userData = {
+    leafCounts,
+    // Typical radians-to-texels scale of the projection.
+    leafWidthTexels: (widthSum / (leafCounts[0] + leafCounts[1])) * R * 0.6,
+    ...coverageStats(blurred, size, cell, R),
+  };
   return texture;
+}
+
+// Coverage inside the discs: its mean, and the fraction of texels above each threshold
+// i / (coverageAbove.length - 1).
+function coverageStats(coverage, size, cell, R) {
+  const bins = 64;
+  const above = new Float64Array(bins + 1);
+  let sum = 0;
+  let count = 0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (Math.hypot((x % cell) + 0.5 - cell / 2, (y % cell) + 0.5 - cell / 2) > R) continue;
+      const c = coverage[y * size + x];
+      sum += c;
+      count++;
+      above[Math.min(Math.floor(c * bins), bins)]++;
+    }
+  }
+  for (let i = bins - 1; i >= 0; i--) above[i] += above[i + 1];
+  return { meanCoverage: sum / count, coverageAbove: Array.from(above, (n) => n / count) };
+}
+
+// Scale on the mip-averaged coverage that makes a minified leaf layer, where each pixel spans
+// several leaves, as opaque on average as the full-resolution layer thresholded at `cutoff`.
+export function farCoverageScale(atlas, cutoff) {
+  const { coverageAbove, meanCoverage } = atlas.userData;
+  const x = clamp(cutoff, 0, 1) * (coverageAbove.length - 1);
+  const i = Math.min(Math.floor(x), coverageAbove.length - 2);
+  return lerp(coverageAbove[i], coverageAbove[i + 1], x - i) / meanCoverage;
 }
 
 // Touching leaves would merge into one smooth blob once the coverage is blurred and thresholded,

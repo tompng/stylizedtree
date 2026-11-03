@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { noise1 } from '../math.js';
+import { farCoverageScale } from './leafAtlas.js';
 import { evaluateLod } from './lod.js';
 
 const TINTS = {
@@ -39,6 +40,7 @@ export class TreeInstance {
       lodB: new THREE.Vector4(),
       lodC: new THREE.Vector4(),
       lodD: new THREE.Vector4(),
+      farLeaf: new THREE.Vector4(),
       wood: new THREE.Vector4(1, 1, 1, 0),
       decal: new THREE.Vector4(),
     };
@@ -68,7 +70,7 @@ export class TreeInstance {
     for (const mesh of [this.shell, this.core, this.inner, this.crown, this.wood]) mesh.geometry.dispose();
   }
 
-  update({ camera, viewportHeight, lodSettings, sunWorld, wind, time, tintAmount, showInner }) {
+  update({ camera, viewportHeight, lodSettings, sunWorld, wind, time, tintAmount, showInner, atlases }) {
     const { asset, state } = this;
     this.group.updateMatrixWorld();
     inverse.copy(this.group.matrixWorld).invert();
@@ -96,6 +98,7 @@ export class TreeInstance {
     state.lodB.set(1, e.coreLevel, e.coreMorph, e.merge);
     state.lodC.set(e.crownLevel, e.crownMorph, e.merge, 0);
     state.lodD.set(e.cutoff, e.dissolve, e.innerFade, 0);
+    state.farLeaf.set(farCoverageScale(atlases.leaf, e.cutoff), farCoverageScale(atlases.inner, e.cutoff), 0, 0);
     state.wood.set(1, e.limbScale, e.twigScale, 0);
 
     this.shell.visible = e.shellActive;
