@@ -4,15 +4,15 @@ import { lobeMean } from './clusterShape.js';
 
 export const defaultTreeParams = {
   seed: 5,
-  height: 8.5,
-  crownWidth: 8.6,
-  crownHeight: 5.4,
-  clusterCount: 12,
-  clusterSize: 1.0,
+  height: 10,
+  crownWidth: 10,
+  crownHeight: 8,
+  clusterCount: 8,
+  clusterSize: 0.8,
   clusterFlatten: 0.8,
   clusterLobes: 5,
-  clusterBumps: 0.3,
-  lobeSharpness: 3.5,
+  clusterBumps: 0.8,
+  lobeSharpness: 5,
   trunkRadius: 0.32,
   limbCount: 4,
 };

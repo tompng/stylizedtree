@@ -5,11 +5,11 @@ import { CrownField } from './crownField.js';
 import { buildIcosphere } from './icosphere.js';
 
 export const defaultShellParams = {
-  patchDivisions: 1,
-  overlap: 2.2,
-  flare: 0.16,
+  patchDivisions: 2,
+  overlap: 4,
+  flare: 0.4,
   depth: 0.35,
-  gridSegments: 4,
+  gridSegments: 3,
   crownSmooth: 1.0,
 };
 
