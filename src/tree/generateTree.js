@@ -11,8 +11,8 @@ export const defaultTreeParams = {
   clusterSize: 0.75,
   clusterFlatten: 0.8,
   clusterLobes: 5,
-  clusterBumps: 0.8,
-  lobeSharpness: 5,
+  clusterBumps: 0.5,
+  lobeSharpness: 8,
   trunkRadius: 0.32,
   limbCount: 4,
 };

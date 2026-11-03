@@ -38,7 +38,7 @@ const env = { sunAzimuth: 140, sunElevation: 38, windStrength: 0.35, windDirecti
 const view = { layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft', innerBall: true };
 // Leaves are packed close to the densest non-touching arrangement, so their count is set by their
 // size: about 840 per sphere at sizeScale 1, scaling with 1 / size².
-const atlasParams = { leafCount: 840 };
+const atlasParams = { leafCount: 2000 };
 const createShellAtlas = () => createLeafAtlas({ sizeScale: Math.sqrt(840 / atlasParams.leafCount) });
 const atlases = {
   leaf: createShellAtlas(),
