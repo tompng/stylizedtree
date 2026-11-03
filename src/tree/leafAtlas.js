@@ -116,9 +116,9 @@ function withLeafFrame(ctx, { x, y, phi, radialScale, tangentialScale, heading }
   ctx.restore();
 }
 
-function leafPath(ctx, length, width, endAngle = Math.PI * 2) {
+function leafPath(ctx, length, width) {
   ctx.beginPath();
-  ctx.ellipse(0, 0, length / 2, width / 2, 0, 0, endAngle);
+  ctx.ellipse(0, 0, length / 2, width / 2, 0, 0, Math.PI * 2);
   ctx.closePath();
 }
 
@@ -140,9 +140,6 @@ function drawLeaf([alphaCtx, randCtx, strokeCtx, coreCtx], leaf) {
     gradient.addColorStop(1, 'rgb(210,210,210)');
     leafPath(strokeCtx, length, width);
     strokeCtx.fillStyle = gradient;
-    strokeCtx.fill();
-    leafPath(strokeCtx, length, width, Math.PI);
-    strokeCtx.fillStyle = 'rgba(0,0,0,0.22)';
     strokeCtx.fill();
   });
   withLeafFrame(coreCtx, leaf, () => {
