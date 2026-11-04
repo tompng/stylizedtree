@@ -9,8 +9,8 @@ export const defaultLodSettings = {
   bias: 0,
   referencePixels: 400,
 
-  collapseStart: 0,
-  collapseEnd: 1.8,
+  collapseStart: 1.4,
+  collapseEnd: 3.2,
   // L per shell grid level (shellGridLevel).
   gridLevelSpacing: 0.9,
   dissolveEnd: 3.8,
