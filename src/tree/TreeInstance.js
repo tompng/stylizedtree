@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { noise1 } from '../math.js';
 import { farCoverageScale } from './leafAtlas.js';
-import { evaluateLod } from './lod.js';
+import { evaluateLod, shellGridLevel } from './lod.js';
 
 const TINTS = {
   shell: [0.95, 0.35, 0.3],
@@ -94,11 +94,12 @@ export class TreeInstance {
     crownWorld.copy(asset.tree.crownCenter).applyMatrix4(this.group.matrixWorld);
     this.distance = Math.max(camera.position.distanceTo(crownWorld), 0.01);
     this.radiusPx = (asset.crownRadius / (this.distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * (viewportHeight / 2);
-    let level = 0;
+    // 'off' shows the finest representation, which may sit below L = 0.
+    let level = -10;
     if (lodSettings.mode === 'auto') level = Math.log2(lodSettings.referencePixels / this.radiusPx) + lodSettings.bias;
     else if (lodSettings.mode === 'manual') level = lodSettings.manualLevel;
-    const e = evaluateLod(Math.max(level, 0), lodSettings);
-    ({ level: e.shellLevel, morph: e.shellMorph } = steppedLevel(e.shellPoly, asset.shell.segments));
+    const e = evaluateLod(level, lodSettings);
+    ({ level: e.shellLevel, morph: e.shellMorph } = shellGridLevel(level, lodSettings, asset.shell.segments));
     ({ level: e.coreLevel, morph: e.coreMorph } = steppedLevel(e.corePoly, asset.core.maxLevel));
     ({ level: e.woodDetail, morph: e.woodMorph } = steppedLevel(e.woodPoly, asset.wood.ranges.length - 1));
     this.lod = e;

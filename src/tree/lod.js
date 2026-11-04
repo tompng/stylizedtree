@@ -1,6 +1,7 @@
 import { clamp, lerp, smoothstep } from '../math.js';
 
-// LOD level L = log2(referencePixels / projected crown radius in px): +1 per doubling of distance.
+// LOD level L = log2(referencePixels / projected crown radius in px): +1 per doubling of distance,
+// negative closer than where the crown radius is referencePixels.
 // The *Poly ranges are split evenly between the levels of their mesh (TreeInstance).
 export const defaultLodSettings = {
   mode: 'auto',
@@ -8,10 +9,10 @@ export const defaultLodSettings = {
   bias: 0,
   referencePixels: 400,
 
-  collapseStart: 1.4,
-  collapseEnd: 3.2,
-  // The last shell grid level morphs onto the core mesh, which replaces the shell at collapseEnd.
-  shellPolyStart: 1.4,
+  collapseStart: 0,
+  collapseEnd: 1.8,
+  // L per shell grid level (shellGridLevel).
+  gridLevelSpacing: 0.9,
   dissolveEnd: 3.8,
   woodPolyStart: 2.5,
   woodPolyEnd: 4.5,
@@ -37,7 +38,6 @@ export function evaluateLod(level, s) {
     level,
     near: 1 - collapse,
     shellActive: level < s.collapseEnd,
-    shellPoly: progress(level, s.shellPolyStart, s.collapseEnd),
     woodPoly: progress(level, s.woodPolyStart, s.woodPolyEnd),
     corePoly: progress(level, s.corePolyStart, s.corePolyEnd),
     cutoff: lerp(s.cutoffNear, s.cutoffFar, collapse),
@@ -46,4 +46,14 @@ export function evaluateLod(level, s) {
     limbScale,
     twigScale: 1 - smoothstep(s.twigFadeStart, s.twigFadeEnd, level),
   };
+}
+
+// Coming closer, shell grid level k is swapped in at collapseEnd - (k - 1) * gridLevelSpacing,
+// still morphed onto level k - 1 (the core mesh for k = 1), and unfolds over the next spacing, so
+// each halving of the distance adds about one segment, up to `segments`.
+export function shellGridLevel(level, s, segments) {
+  const t = (s.collapseEnd - level) / Math.max(s.gridLevelSpacing, 1e-3);
+  if (t >= segments) return { level: segments, morph: 0 };
+  const k = Math.max(Math.floor(t), 0);
+  return { level: k + 1, morph: Math.min(1 - (t - k), 1) };
 }

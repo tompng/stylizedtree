@@ -114,15 +114,15 @@ function buildGui() {
 
   const fLod = gui.addFolder('LOD');
   fLod.add(lodSettings, 'mode', ['auto', 'manual', 'off']);
-  fLod.add(lodSettings, 'manualLevel', 0, 9, 0.01);
+  fLod.add(lodSettings, 'manualLevel', -3, 9, 0.01);
   fLod.add(lodSettings, 'bias', -3, 3, 0.01);
   fLod.add(lodSettings, 'referencePixels', 100, 1000, 10);
   const fStages = fLod.addFolder('stage ranges (L)').close();
   for (const key of [
-    'collapseStart', 'collapseEnd', 'shellPolyStart', 'dissolveEnd', 'woodPolyStart', 'woodPolyEnd', 'corePolyStart', 'corePolyEnd',
+    'collapseStart', 'collapseEnd', 'gridLevelSpacing', 'dissolveEnd', 'woodPolyStart', 'woodPolyEnd', 'corePolyStart', 'corePolyEnd',
     'innerFadeStart', 'innerFadeEnd', 'twigFadeStart', 'twigFadeEnd', 'limbFadeStart', 'limbFadeEnd',
   ]) {
-    fStages.add(lodSettings, key, 0, 10, 0.05);
+    fStages.add(lodSettings, key, -3, 10, 0.05);
   }
   const fStageParams = fLod.addFolder('stage params').close();
   fStageParams.add(lodSettings, 'cutoffNear', 0, 1, 0.01);
