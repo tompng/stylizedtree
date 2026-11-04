@@ -8,12 +8,6 @@ fn st_hash21(p: vec2f) -> f32 {
   return fract((q.x + q.y) * q.z);
 }
 
-fn st_hash31(p: vec3f) -> f32 {
-  var q = fract(p * 0.1031);
-  q = q + dot(q, q.zyx + 31.32);
-  return fract((q.x + q.y) * q.z);
-}
-
 fn st_noise2(p: vec2f) -> f32 {
   let i = floor(p);
   let f = fract(p);
@@ -25,27 +19,10 @@ fn st_noise2(p: vec2f) -> f32 {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-fn st_noise3(p: vec3f) -> f32 {
-  let i = floor(p);
-  let f = fract(p);
-  let u = f * f * (3.0 - 2.0 * f);
-  let x00 = mix(st_hash31(i), st_hash31(i + vec3f(1.0, 0.0, 0.0)), u.x);
-  let x10 = mix(st_hash31(i + vec3f(0.0, 1.0, 0.0)), st_hash31(i + vec3f(1.0, 1.0, 0.0)), u.x);
-  let x01 = mix(st_hash31(i + vec3f(0.0, 0.0, 1.0)), st_hash31(i + vec3f(1.0, 0.0, 1.0)), u.x);
-  let x11 = mix(st_hash31(i + vec3f(0.0, 1.0, 1.0)), st_hash31(i + vec3f(1.0, 1.0, 1.0)), u.x);
-  return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
-}
-
 fn st_fbm2(p: vec2f) -> f32 {
   return st_noise2(p) * 0.55
     + st_noise2(p * 2.07 + vec2f(17.3, 9.1)) * 0.3
     + st_noise2(p * 4.13 + vec2f(3.7, 41.9)) * 0.15;
-}
-
-fn st_fbm3(p: vec3f) -> f32 {
-  return st_noise3(p) * 0.55
-    + st_noise3(p * 2.07 + vec3f(17.3, 9.1, 5.7)) * 0.3
-    + st_noise3(p * 4.13 + vec3f(3.7, 41.9, 23.3)) * 0.15;
 }
 
 fn st_windOffset(anchor: vec3f, wind: vec4f, tree: vec4f) -> vec3f {

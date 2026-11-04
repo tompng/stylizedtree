@@ -106,7 +106,7 @@ export class TreeInstance {
 
     state.lodA.set(e.near, e.shellLevel, e.shellMorph, 0);
     state.lodB.set(1, e.coreLevel, e.coreMorph, 0);
-    state.lodD.set(e.cutoff, e.dissolve, e.innerFade, 0);
+    state.lodD.set(e.cutoff, 0, e.innerFade, 0);
     state.farLeaf.set(farCoverageScale(atlases.leaf, e.cutoff), farCoverageScale(atlases.inner, e.cutoff), 0, 0);
     state.wood.set(1, e.limbScale, e.twigScale, 0);
     state.woodLod.set(e.woodDetail, e.woodMorph, 0, 0);

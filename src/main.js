@@ -121,7 +121,7 @@ function buildGui() {
   fLod.add(lodSettings, 'referencePixels', 100, 1000, 10);
   const fStages = fLod.addFolder('stage ranges (L)').close();
   for (const key of [
-    'collapseStart', 'collapseEnd', 'gridLevelSpacing', 'dissolveEnd', 'woodPolyStart', 'woodPolyEnd', 'corePolyStart', 'corePolyEnd',
+    'collapseStart', 'collapseEnd', 'gridLevelSpacing', 'woodPolyStart', 'woodPolyEnd', 'corePolyStart', 'corePolyEnd',
     'innerFadeStart', 'innerFadeEnd', 'twigFadeStart', 'twigFadeEnd', 'limbFadeStart', 'limbFadeEnd',
   ]) {
     fStages.add(lodSettings, key, -3, 10, 0.05);
@@ -182,7 +182,6 @@ function buildGui() {
   vec(fLook, params.look, 3, 'skyAmbient', 0, 1, 0.01);
   vec(fLook, params.look2, 0, 'patchNormalWeight', 0, 1, 0.01);
   vec(fLook, params.look2, 1, 'farDensity', 0, 2, 0.01);
-  vec(fLook, params.look2, 2, 'dissolveFrequency', 0.2, 6, 0.05);
   vec(fLook, params.edge, 0, 'edgeSoftness', 0, 1, 0.01);
   vec(fLook, params.edge, 1, 'alphaDither', 0, 1, 0.01);
   vec(fLook, params.patchFade, 0, 'patchFadeStart', 0, 1, 0.01);
@@ -244,7 +243,7 @@ function updateHud(focus) {
     `L ${fmt(e.level)}   crown radius ${fmt(focus.radiusPx, 0)}px   dist ${fmt(focus.distance, 0)}m`,
     e.shellActive
       ? `shell  near ${fmt(e.near)}  grid ${e.shellLevel}  morph ${fmt(e.shellMorph)}  patches ${asset.shell.patchCount}  cutoff ${fmt(e.cutoff)}`
-      : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}  dissolve ${fmt(e.dissolve)}`,
+      : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}`,
     `wood   detail ${e.woodDetail}  morph ${fmt(e.woodMorph)}`,
     `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
     `atlas  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,

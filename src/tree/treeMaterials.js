@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, float, mix, screenCoordinate, texture, uniform, varying, vec3, vec4, wgsl, wgslFn } from 'three/tsl';
+import { attribute, float, mix, screenCoordinate, texture, uniform, varying, vec4, wgsl, wgslFn } from 'three/tsl';
 import clusterBendSrc from '../shaders/cluster_bend.wgsl?raw';
 import clusterDeformSrc from '../shaders/cluster_deform.wgsl?raw';
 import commonSrc from '../shaders/common.wgsl?raw';
@@ -86,9 +86,9 @@ export const params = {
   ramp: uniform(new THREE.Vector4(0.42, 0.66, 0.16, 0.1)),
   // translucency, edgeBrightness, hueVariation, skyAmbient
   look: uniform(new THREE.Vector4(0.55, 0.08, 0.25, 0.6)),
-  // patchNormalWeight, farDensity (scales leaf opacity once pixels span several leaves), dissolveFrequency,
+  // patchNormalWeight, farDensity (scales leaf opacity once pixels span several leaves), -,
   // bakedAo (0 ignores the occlusion baked from the other clusters)
-  look2: uniform(new THREE.Vector4(0.35, 1.25, 1.6, 1)),
+  look2: uniform(new THREE.Vector4(0.35, 1.25, 0, 1)),
   // edgeSoftness, alphaDither, -, -
   edge: uniform(new THREE.Vector4(0.6, 0.25, 0, 0)),
   // start (1 - bump where leaves start shrinking), strength, grazing (edge-on patches), -
@@ -251,8 +251,6 @@ export function createTreeMaterials(asset, atlases) {
         shrink: params.leafShrink,
       }),
       misc: vec4(clusterIndex, patchEdge.mul(near), 0, 0),
-      noisePos: vec3(0),
-      bulkCenter: vec3(0),
     });
   }
 
@@ -287,9 +285,7 @@ export function createTreeMaterials(asset, atlases) {
         threshold: float(0),
         shrink: params.leafShrink,
       }),
-      misc: vec4(clusterIndex, 0, I.lodD.y, 1),
-      noisePos: restV,
-      bulkCenter: varying(cCenter),
+      misc: vec4(clusterIndex, 0, 0, 0),
     });
   }
 
@@ -325,8 +321,6 @@ export function createTreeMaterials(asset, atlases) {
         shrink: params.leafShrink,
       }),
       misc: vec4(clusterIndex, 0, 0, 0),
-      noisePos: vec3(0),
-      bulkCenter: vec3(0),
     });
   }
 

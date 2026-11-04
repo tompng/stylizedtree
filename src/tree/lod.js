@@ -13,7 +13,6 @@ export const defaultLodSettings = {
   collapseEnd: 3.2,
   // L per shell grid level (shellGridLevel).
   gridLevelSpacing: 0.9,
-  dissolveEnd: 3.8,
   woodPolyStart: 2.5,
   woodPolyEnd: 4.5,
   corePolyStart: 3.6,
@@ -41,7 +40,6 @@ export function evaluateLod(level, s) {
     woodPoly: progress(level, s.woodPolyStart, s.woodPolyEnd),
     corePoly: progress(level, s.corePolyStart, s.corePolyEnd),
     cutoff: lerp(s.cutoffNear, s.cutoffFar, collapse),
-    dissolve: smoothstep(s.collapseEnd, s.dissolveEnd, level) * limbScale,
     innerFade: smoothstep(s.innerFadeStart, s.innerFadeEnd, level),
     limbScale,
     twigScale: 1 - smoothstep(s.twigFadeStart, s.twigFadeEnd, level),

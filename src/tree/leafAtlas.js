@@ -122,7 +122,6 @@ export function createLeafAtlas({
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  texture.anisotropy = 8;
   texture.needsUpdate = true;
   texture.userData = {
     leafCounts,
