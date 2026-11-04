@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, float, mix, screenCoordinate, texture, uniform, varying, vec4, wgsl, wgslFn } from 'three/tsl';
+import { attribute, float, int, mix, screenCoordinate, texture, uniform, uniformArray, varying, vec4, wgsl, wgslFn } from 'three/tsl';
 import clusterBendSrc from '../shaders/cluster_bend.wgsl?raw';
 import clusterDeformSrc from '../shaders/cluster_deform.wgsl?raw';
 import commonSrc from '../shaders/common.wgsl?raw';
@@ -119,11 +119,6 @@ export const instanceUniforms = {
   cam: perInstance('cam', new THREE.Vector3()),
   wind: perInstance('wind', new THREE.Vector4()),
   tree: perInstance('tree', new THREE.Vector4(8, 0, 0, 0)),
-  lodA: perInstance('lodA', new THREE.Vector4(1, 0, 0, 0)),
-  lodB: perInstance('lodB', new THREE.Vector4(0.8, 2, 0, 0)),
-  lodD: perInstance('lodD', new THREE.Vector4(0.5, 0, 0, 0)),
-  // farCoverageScale of the shell and inner atlases at the instance's cutoff
-  farLeaf: perInstance('farLeaf', new THREE.Vector4(1, 1, 0, 0)),
   wood: perInstance('wood', new THREE.Vector4(1, 1, 1, 0)),
   // drawn wood detail level, geomorph toward the next coarser level
   woodLod: perInstance('woodLod', new THREE.Vector4(2, 0, 0, 0)),
@@ -162,8 +157,14 @@ export function createTreeMaterials(asset, atlases) {
     const mip = Math.log2(atlas.userData.leafWidthTexels);
     return vec4(scale.mul(params.look2.y), mip - 1, mip + 1, 0);
   };
-  const leafFar = farParams(atlases.leaf, I.farLeaf.x);
-  const innerFar = farParams(atlases.inner, I.farLeaf.y);
+  // Per-cluster LOD of the drawn instance (TreeInstance.clusterLod), three vec4s per cluster:
+  // (near, shell grid level, shell morph, alpha cutoff), (inner fade, core level, core morph, -),
+  // (farCoverageScale of the shell atlas, of the inner atlas, -, -).
+  const clusterLod = uniformArray(Array.from({ length: asset.tree.clusters.length * 3 }, () => new THREE.Vector4()), 'vec4')
+    .onObjectUpdate(function ({ object }) {
+      this.array = object.userData.clusterLod;
+    });
+  const lodOf = (clusterIndex, row) => clusterLod.element(int(clusterIndex.add(0.5)).mul(3).add(row));
   const shadeArgs = {
     camLocal: I.cam,
     sun: I.sun,
@@ -196,27 +197,28 @@ export function createTreeMaterials(asset, atlases) {
     const basePos = attribute('position', 'vec3');
     const morphFar = attribute('morphFar', 'vec3');
     const clusterIndex = patchData.w;
-    const near = I.lodA.x;
-    const far = shellFarPosition({ basePos, morphFar, patchData, lodA: I.lodA });
+    const lodA = lodOf(clusterIndex, 0);
+    const near = lodA.x;
+    const far = shellFarPosition({ basePos, morphFar, patchData, lodA });
     const rest = shellRestPosition({
       basePos,
       nearOffset: attribute('nearOffset', 'vec3'),
       morphFar,
       morphOffset: attribute('morphOffset', 'vec3'),
       patchData,
-      lodA: I.lodA,
+      lodA,
     });
     const nPatchAo = varying(shellNormalAo({
       nPatchAo: attribute('nPatchAo', 'vec4'),
       morphNormalAo: attribute('morphNormalAo', 'vec4'),
       patchData,
-      lodA: I.lodA,
+      lodA,
     }));
-    const proxy = mix(attribute('proxyNormal', 'vec3'), attribute('morphProxy', 'vec3'), shellMorphFactor({ patchData, lodA: I.lodA }));
-    const patchUv = varying(shellPatchUv({ patchUv: attribute('patchUv', 'vec2'), morphUv: attribute('morphUv', 'vec2'), patchData, lodA: I.lodA }));
+    const proxy = mix(attribute('proxyNormal', 'vec3'), attribute('morphProxy', 'vec3'), shellMorphFactor({ patchData, lodA }));
+    const patchUv = varying(shellPatchUv({ patchUv: attribute('patchUv', 'vec2'), morphUv: attribute('morphUv', 'vec2'), patchData, lodA }));
     const patchEdge = float(1).sub(patchUv.x.mul(patchUv.x.oneMinus()).mul(patchUv.y).mul(patchUv.y.oneMinus()).mul(16));
     const bend = clusterBend({ clusterIndex, ...windArgs });
-    const tilt = patchTilt({ patchCenter, patchData, spheres, wind: I.wind, tree: I.tree, windPatch: params.windPatch, lodA: I.lodA });
+    const tilt = patchTilt({ patchCenter, patchData, spheres, wind: I.wind, tree: I.tree, windPatch: params.windPatch, lodA });
     shell.positionNode = rest.add(shellWind({ rest, patchCenter, patchData, ...windArgs, bend, tilt }));
     const bendV = varying(bend);
     const nPatch = rotateVector({ v: nPatchAo.xyz, w: bendV.add(varying(tilt)) });
@@ -236,8 +238,8 @@ export function createTreeMaterials(asset, atlases) {
         p: farV,
         clusterIndex,
         spheres,
-        cutoff: I.lodD.x,
-        far: leafFar,
+        cutoff: lodA.w,
+        far: farParams(atlases.leaf, lodOf(clusterIndex, 2).x),
         patchRand: mix(float(0.5), patchData.y, near),
         softness: params.edge.x,
         threshold: shellFadeThreshold({
@@ -259,7 +261,7 @@ export function createTreeMaterials(asset, atlases) {
     const coreData = attribute('coreData', 'vec4');
     const clusterIndex = coreData.y;
     const cCenter = attribute('cCenter', 'vec3');
-    const morph = coreMorph({ coreData, lodB: I.lodB });
+    const morph = coreMorph({ coreData, lodB: lodOf(clusterIndex, 1) });
     const rest = mix(attribute('position', 'vec3'), attribute('morphPos', 'vec3'), morph);
     const bend = clusterBend({ clusterIndex, ...windArgs });
     core.positionNode = rest.add(windAt(cCenter)).add(clusterDeform({ p: rest, clusterIndex, ...windArgs, bend, amount: float(1) }));
@@ -278,8 +280,8 @@ export function createTreeMaterials(asset, atlases) {
         p: restV,
         clusterIndex,
         spheres,
-        cutoff: I.lodD.x,
-        far: leafFar,
+        cutoff: lodOf(clusterIndex, 0).w,
+        far: farParams(atlases.leaf, lodOf(clusterIndex, 2).x),
         patchRand: float(0.5),
         softness: params.edge.x,
         threshold: float(0),
@@ -312,12 +314,12 @@ export function createTreeMaterials(asset, atlases) {
         p: restV,
         clusterIndex,
         spheres,
-        cutoff: I.lodD.x,
-        far: innerFar,
+        cutoff: lodOf(clusterIndex, 0).w,
+        far: farParams(atlases.inner, lodOf(clusterIndex, 2).y),
         // Differs from the core's 0.5 so their alpha-to-coverage dither does not line up.
         patchRand: float(0.45),
         softness: params.edge.x,
-        threshold: innerFadeThreshold({ nProxy, posLocal: restV, center: varying(center), camLocal: I.cam, inner: params.inner, lodD: I.lodD }),
+        threshold: innerFadeThreshold({ nProxy, posLocal: restV, center: varying(center), camLocal: I.cam, inner: params.inner, lodFade: lodOf(clusterIndex, 1).x }),
         shrink: params.leafShrink,
       }),
       misc: vec4(clusterIndex, 0, 0, 0),

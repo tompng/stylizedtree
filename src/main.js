@@ -244,6 +244,7 @@ function updateHud(focus) {
     e.shellActive
       ? `shell  near ${fmt(e.near)}  grid ${e.shellLevel}  morph ${fmt(e.shellMorph)}  patches ${asset.shell.patchCount}  cutoff ${fmt(e.cutoff)}`
       : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}`,
+    `clusters  ${e.shellClusters} in shell   draws shell/core/inner ${e.clusterDraws.join(' / ')}`,
     `wood   detail ${e.woodDetail}  morph ${fmt(e.woodMorph)}`,
     `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
     `atlas  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,

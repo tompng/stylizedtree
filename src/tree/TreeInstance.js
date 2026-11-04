@@ -12,7 +12,7 @@ const TINTS = {
 
 const decalGeometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 
-// Each instance gets its own BufferGeometry (for its own draw range) sharing the asset's attributes.
+// Each instance gets its own BufferGeometry (for its own draw range and groups) sharing the asset's attributes.
 function shareGeometry(source) {
   const geometry = new THREE.BufferGeometry();
   for (const [name, attribute] of Object.entries(source.attributes)) geometry.setAttribute(name, attribute);
@@ -29,8 +29,37 @@ function steppedLevel(progress, steps) {
   return { level: steps - step, morph: x - step };
 }
 
+// Rebuilds the mesh's draw groups from a level per cluster (-1 = not drawn). The index buffer is
+// ordered by level, then cluster, so neighbouring clusters at the same level join one draw.
+function setClusterGroups(mesh, ranges, levels) {
+  const { groups } = mesh.geometry;
+  let count = 0;
+  let open = null;
+  let openLevel = -1;
+  levels.forEach((level, cluster) => {
+    if (level < 0) {
+      open = null;
+      return;
+    }
+    const range = ranges[level].clusters[cluster];
+    if (open && openLevel === level && open.start + open.count === range.start) {
+      open.count += range.count;
+      return;
+    }
+    open = groups[count] ?? (groups[count] = { start: 0, count: 0, materialIndex: 0 });
+    open.start = range.start;
+    open.count = range.count;
+    openLevel = level;
+    count++;
+  });
+  groups.length = count;
+  mesh.visible = count > 0;
+  return count;
+}
+
 const inverse = new THREE.Matrix4();
 const crownWorld = new THREE.Vector3();
+const clusterWorld = new THREE.Vector3();
 const tmp = new THREE.Vector3();
 const corner = new THREE.Vector3();
 
@@ -43,17 +72,19 @@ export class TreeInstance {
       cam: new THREE.Vector3(),
       wind: new THREE.Vector4(),
       tree: new THREE.Vector4(),
-      lodA: new THREE.Vector4(),
-      lodB: new THREE.Vector4(),
-      lodD: new THREE.Vector4(),
-      farLeaf: new THREE.Vector4(),
       wood: new THREE.Vector4(1, 1, 1, 0),
       woodLod: new THREE.Vector4(),
       decal: new THREE.Vector4(),
     };
-    this.shell = this.addMesh(shareGeometry(asset.shell.geometry), materials.shell, 'shell');
-    this.core = this.addMesh(shareGeometry(asset.core.geometry), materials.core, 'core');
-    this.inner = this.addMesh(shareGeometry(asset.inner.geometry), materials.inner, 'inner');
+    // Shell, core and inner ball pick their level per cluster: the materials read clusterLod by
+    // cluster index, and each mesh draws its clusters' ranges as geometry groups (material arrays).
+    const clusterCount = asset.tree.clusters.length;
+    this.clusterLod = Array.from({ length: clusterCount * 3 }, () => new THREE.Vector4());
+    this.clusterLevels = { shell: new Array(clusterCount), core: new Array(clusterCount), inner: new Array(clusterCount) };
+    this.shell = this.addMesh(shareGeometry(asset.shell.geometry), [materials.shell], 'shell');
+    this.core = this.addMesh(shareGeometry(asset.core.geometry), [materials.core], 'core');
+    this.inner = this.addMesh(shareGeometry(asset.inner.geometry), [materials.inner], 'inner');
+    for (const mesh of [this.shell, this.core, this.inner]) mesh.userData.clusterLod = this.clusterLod;
     this.wood = this.addMesh(shareGeometry(asset.wood.geometry), materials.wood, 'wood');
     this.decal = this.addMesh(decalGeometry, materials.decal, 'wood');
     this.decal.frustumCulled = false;
@@ -91,35 +122,48 @@ export class TreeInstance {
     state.wind.set(tmp.x, tmp.y, tmp.z, time);
     state.tree.set(asset.tree.height, this.phase * 6.283, gust, wind.flutter);
 
+    // L uses the crown radius as seen from a given distance; per cluster, the distance is the
+    // cluster's, so a tree far away has every cluster at about the tree's level.
+    const pixelsPerUnit = viewportHeight / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const levelAt = (distance) => {
+      // 'off' shows the finest representation, which may sit below L = 0.
+      if (lodSettings.mode === 'auto') return Math.log2((lodSettings.referencePixels * distance) / (asset.crownRadius * pixelsPerUnit)) + lodSettings.bias;
+      if (lodSettings.mode === 'manual') return lodSettings.manualLevel;
+      return -10;
+    };
     crownWorld.copy(asset.tree.crownCenter).applyMatrix4(this.group.matrixWorld);
     this.distance = Math.max(camera.position.distanceTo(crownWorld), 0.01);
-    this.radiusPx = (asset.crownRadius / (this.distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * (viewportHeight / 2);
-    // 'off' shows the finest representation, which may sit below L = 0.
-    let level = -10;
-    if (lodSettings.mode === 'auto') level = Math.log2(lodSettings.referencePixels / this.radiusPx) + lodSettings.bias;
-    else if (lodSettings.mode === 'manual') level = lodSettings.manualLevel;
+    this.radiusPx = (asset.crownRadius / this.distance) * pixelsPerUnit;
+    const level = levelAt(this.distance);
     const e = evaluateLod(level, lodSettings);
     ({ level: e.shellLevel, morph: e.shellMorph } = shellGridLevel(level, lodSettings, asset.shell.segments));
     ({ level: e.coreLevel, morph: e.coreMorph } = steppedLevel(e.corePoly, asset.core.maxLevel));
     ({ level: e.woodDetail, morph: e.woodMorph } = steppedLevel(e.woodPoly, asset.wood.ranges.length - 1));
     this.lod = e;
 
-    state.lodA.set(e.near, e.shellLevel, e.shellMorph, 0);
-    state.lodB.set(1, e.coreLevel, e.coreMorph, 0);
-    state.lodD.set(e.cutoff, 0, e.innerFade, 0);
-    state.farLeaf.set(farCoverageScale(atlases.leaf, e.cutoff), farCoverageScale(atlases.inner, e.cutoff), 0, 0);
     state.wood.set(1, e.limbScale, e.twigScale, 0);
     state.woodLod.set(e.woodDetail, e.woodMorph, 0, 0);
 
-    this.shell.visible = e.shellActive;
-    const shellRange = asset.shell.ranges[e.shellLevel];
-    this.shell.geometry.setDrawRange(shellRange.start, shellRange.count);
-
-    const coreRange = asset.core.ranges[e.coreLevel];
-    this.core.visible = !e.shellActive;
-    this.core.geometry.setDrawRange(coreRange.start, coreRange.count);
-
-    this.inner.visible = showInner && e.innerFade < 1;
+    const { shell: shellLevels, core: coreLevels, inner: innerLevels } = this.clusterLevels;
+    asset.tree.clusters.forEach((cluster, ci) => {
+      clusterWorld.copy(cluster.center).applyMatrix4(this.group.matrixWorld);
+      const clusterLevel = levelAt(Math.max(camera.position.distanceTo(clusterWorld), 0.01));
+      const c = evaluateLod(clusterLevel, lodSettings);
+      const shell = shellGridLevel(clusterLevel, lodSettings, asset.shell.segments);
+      const core = steppedLevel(c.corePoly, asset.core.maxLevel);
+      this.clusterLod[ci * 3].set(c.near, shell.level, shell.morph, c.cutoff);
+      this.clusterLod[ci * 3 + 1].set(c.innerFade, core.level, core.morph, 0);
+      this.clusterLod[ci * 3 + 2].set(farCoverageScale(atlases.leaf, c.cutoff), farCoverageScale(atlases.inner, c.cutoff), 0, 0);
+      shellLevels[ci] = c.shellActive ? shell.level : -1;
+      coreLevels[ci] = c.shellActive ? -1 : core.level;
+      innerLevels[ci] = showInner && c.innerFade < 1 ? 0 : -1;
+    });
+    e.clusterDraws = [
+      setClusterGroups(this.shell, asset.shell.ranges, shellLevels),
+      setClusterGroups(this.core, asset.core.ranges, coreLevels),
+      setClusterGroups(this.inner, asset.inner.ranges, innerLevels),
+    ];
+    e.shellClusters = shellLevels.filter((l) => l >= 0).length;
 
     const woodLevel = e.twigScale > 0 ? 2 : e.limbScale > 0 ? 1 : 0;
     const woodRange = asset.wood.ranges[e.woodDetail];

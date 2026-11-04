@@ -206,7 +206,7 @@ function buildCore(tree, tiling) {
   const w = new AttributeWriter(vertexCount, {
     position: 3, morphPos: 3, normal: 3, morphNormal: 3, coreData: 4, cCenter: 3, ao: 1,
   });
-  const levelIndices = Array.from({ length: topLevel + 1 }, () => []);
+  const levelIndices = Array.from({ length: topLevel + 1 }, () => tree.clusters.map(() => []));
   let base = 0;
   for (const { cluster, ci, positions, normals, ao, birth, target, levels } of groups) {
     positions.forEach((p, vi) => {
@@ -220,7 +220,7 @@ function buildCore(tree, tiling) {
       w.set('ao', index, ao[vi]);
     });
     levels.forEach((faces, level) => {
-      for (const v of faces) levelIndices[level].push(base + v);
+      for (const v of faces) levelIndices[level][ci].push(base + v);
     });
     base += positions.length;
   }
@@ -228,13 +228,19 @@ function buildCore(tree, tiling) {
   return { geometry: w.toGeometry(indices), ranges, maxLevel: topLevel };
 }
 
-// Index ranges per level, finest level first.
+// levelIndices[level][cluster] -> one index buffer ordered by level (finest first), then by
+// cluster, so that clusters drawn at the same level with consecutive indices form one range.
 function concatLevels(levelIndices) {
   const indices = [];
   const ranges = [];
   for (let level = levelIndices.length - 1; level >= 0; level--) {
-    ranges[level] = { start: indices.length, count: levelIndices[level].length };
-    for (const i of levelIndices[level]) indices.push(i);
+    const start = indices.length;
+    const clusters = levelIndices[level].map((list) => {
+      const clusterStart = indices.length;
+      for (const i of list) indices.push(i);
+      return { start: clusterStart, count: list.length };
+    });
+    ranges[level] = { start, count: indices.length - start, clusters };
   }
   return { indices, ranges };
 }
@@ -255,8 +261,8 @@ function buildInner(tree, params) {
     });
   });
   const faces = ico.levels[INNER_LEVEL];
-  const indices = clusters.flatMap((_, ci) => faces.map((v) => ci * perCluster + v));
-  return { geometry: w.toGeometry(indices) };
+  const { indices, ranges } = concatLevels([clusters.map((_, ci) => faces.map((v) => ci * perCluster + v))]);
+  return { geometry: w.toGeometry(indices), ranges };
 }
 
 // Linear scale from the leaf atlas (directions on the unit sphere) to the cluster surface over one
@@ -305,7 +311,7 @@ function buildShell(tree, occlusion, params, tiling) {
     position: 3, nearOffset: 3, patchCenter: 4, patchUv: 2, patchData: 4, nPatchAo: 4,
     morphFar: 3, morphOffset: 3, morphNormalAo: 4, morphUv: 2, proxyNormal: 3, morphProxy: 3,
   });
-  const levelIndices = Array.from({ length: segments + 1 }, () => []);
+  const levelIndices = Array.from({ length: segments + 1 }, () => tree.clusters.map(() => []));
   const { topTriangles } = tiling;
   const scale = Math.sqrt(Math.max(params.overlap, 1));
   let maxOffset = 0;
@@ -425,7 +431,7 @@ function buildShell(tree, occlusion, params, tiling) {
                 const c = a + k + 1;
                 const d = c + 1;
                 const faces = antiDiagonal ? [a, b, c, b, d, c] : [a, b, d, a, d, c];
-                for (const f of faces) levelIndices[k].push(f);
+                for (const f of faces) levelIndices[k][ci].push(f);
               }
             }
           }
