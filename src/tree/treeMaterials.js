@@ -86,8 +86,9 @@ export const params = {
   ramp: uniform(new THREE.Vector4(0.42, 0.66, 0.16, 0.1)),
   // translucency, edgeBrightness, hueVariation, skyAmbient
   look: uniform(new THREE.Vector4(0.55, 0.08, 0.25, 0.6)),
-  // patchNormalWeight, farDensity (scales leaf opacity once pixels span several leaves), dissolveFrequency, -
-  look2: uniform(new THREE.Vector4(0.35, 1.25, 1.6, 0)),
+  // patchNormalWeight, farDensity (scales leaf opacity once pixels span several leaves), dissolveFrequency,
+  // bakedAo (0 ignores the occlusion baked from the other clusters)
+  look2: uniform(new THREE.Vector4(0.35, 1.25, 1.6, 1)),
   // edgeSoftness, alphaDither, -, -
   edge: uniform(new THREE.Vector4(0.6, 0.25, 0, 0)),
   // start (1 - bump where leaves start shrinking), strength, grazing (edge-on patches), -
@@ -186,6 +187,7 @@ export function createTreeMaterials(asset, atlases) {
   const sunVisibility = (p) => varying(sunVisibilityAt({ p, sun: I.sun, spheres, counts, shadow: params.shadow }));
   const windAt = (anchor) => windOffsetAt({ anchor, wind: I.wind, tree: I.tree });
   const windArgs = { spheres, wind: I.wind, tree: I.tree, windBend: params.windBend };
+  const bakedAo = (ao) => mix(float(1), ao, params.look2.w);
 
   const shell = foliageMaterial(THREE.DoubleSide);
   {
@@ -220,7 +222,7 @@ export function createTreeMaterials(asset, atlases) {
     const nPatch = rotateVector({ v: nPatchAo.xyz, w: bendV.add(varying(tilt)) });
     const farV = varying(far);
     const restV = varying(rest);
-    const ao = nPatchAo.w.mul(mix(float(1), params.tone.w, patchData.x.mul(near)));
+    const ao = bakedAo(nPatchAo.w).mul(mix(float(1), params.tone.w, patchData.x.mul(near)));
     shell.colorNode = foliageShade({
       ...shadeArgs,
       nProxy: rotateVector({ v: varying(proxy), w: bendV }),
@@ -269,7 +271,7 @@ export function createTreeMaterials(asset, atlases) {
       ...shadeArgs,
       nProxy: rotateVector({ v: varying(proxy), w: varying(bend) }),
       nDetail: vec4(0),
-      ao: attribute('ao', 'float'),
+      ao: bakedAo(attribute('ao', 'float')),
       posLocal: restV,
       sunVis: sunVisibility(rest),
       leaf: leafSphereSample({
@@ -334,7 +336,7 @@ export function createTreeMaterials(asset, atlases) {
     const morphData = attribute('morphData', 'vec4');
     const morph = woodMorph({ morphData, woodLod: I.woodLod });
     const baseData = attribute('woodData', 'vec4');
-    const woodData = vec4(baseData.x, mix(baseData.y, morphData.x, morph), baseData.z, mix(baseData.w, morphData.y, morph));
+    const woodData = vec4(baseData.x, bakedAo(mix(baseData.y, morphData.x, morph)), baseData.z, mix(baseData.w, morphData.y, morph));
     const axisPos = mix(attribute('axisPos', 'vec3'), attribute('morphAxis', 'vec3'), morph);
     const pos = mix(attribute('position', 'vec3'), attribute('morphPos', 'vec3'), morph);
     const rest = woodRestPosition({ pos, axisPos, woodData, lodW: I.wood });

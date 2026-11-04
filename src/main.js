@@ -35,7 +35,9 @@ const treeParams = { ...defaultTreeParams };
 const shellParams = { ...defaultShellParams };
 const lodSettings = { ...defaultLodSettings };
 const env = { sunAzimuth: 140, sunElevation: 38, windStrength: 0.35, windDirection: 20, gust: 0.6, flutter: 0.04, fogDensity: 0.0012 };
-const view = { layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft', innerBall: true };
+const view = {
+  layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft', innerBall: true, bakedAo: true,
+};
 // Leaves are packed close to the densest non-touching arrangement, so their count is set by their
 // size: about 840 per sphere at sizeScale 1, scaling with 1 / size².
 const atlasParams = { leafCount: 2000 };
@@ -189,6 +191,7 @@ function buildGui() {
   vec(fLook, params.leafShrink, 0, 'shrinkLeafVariation', 0, 1, 0.01);
   vec(fLook, params.leafShrink, 1, 'shrinkSoftness', 0.01, 0.5, 0.01);
   fLook.add(view, 'innerBall');
+  fLook.add(view, 'bakedAo').onChange((on) => params.look2.value.setW(on ? 1 : 0));
   vec(fLook, params.inner, 0, 'innerShade', 0, 1, 0.01);
   vec(fLook, params.inner, 1, 'innerRimWidth', 0.05, 1, 0.01);
   vec(fLook, params.inner, 2, 'innerThin', 0, 1, 0.01);
