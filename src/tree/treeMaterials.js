@@ -77,7 +77,7 @@ export const palette = {
 
 // Packed vec4 layouts must match the `let` unpacking at the top of each WGSL function.
 export const stylePresets = {
-  soft: { ramp: [0.42, 0.66, 0.16, 0.1], edge: [0.6, 0.25, 0, 0], tone: [0.75, 0.4, 0.7, 0.65] },
+  soft: { ramp: [0.42, 0.66, 0.16, 0.1], edge: [0.4, 0.25, 0, 0], tone: [0.75, 0.4, 0.7, 0.65] },
   crisp: { ramp: [0.42, 0.66, 0.05, 0.16], edge: [0, 0, 0, 0], tone: [1, 0.12, 1, 0.65] },
 };
 
@@ -90,7 +90,7 @@ export const params = {
   // bakedAo (0 ignores the occlusion baked from the other clusters)
   look2: uniform(new THREE.Vector4(0.35, 1.25, 0, 1)),
   // edgeSoftness, alphaDither, edgeOutward (moves the soft ramp below the cutoff), -
-  edge: uniform(new THREE.Vector4(0.6, 0.25, 0, 0)),
+  edge: uniform(new THREE.Vector4(0.4, 0.25, 0, 0)),
   // start (1 - bump where leaves start shrinking), strength, grazing (edge-on patches), -
   patchFade: uniform(new THREE.Vector4(0.15, 1, 1, 0)),
   // per-leaf variation of the shrink threshold, shrink softness
