@@ -40,13 +40,13 @@ const view = {
 };
 // Leaves are packed close to the densest non-touching arrangement, so their count is set by their
 // size: about 840 per sphere at sizeScale 1, scaling with 1 / size².
-// ?leafTex=1024&innerTex=512 sets the atlas sizes in texels (2x2 cells); the leaves stay the same.
+// ?leafTex=2048&innerTex=1024 sets the atlas sizes in texels (2x2 cells); the leaves stay the same.
 const urlParams = new URLSearchParams(location.search);
 const atlasCell = (name, fallback) => {
   const size = Number(urlParams.get(name));
   return Number.isFinite(size) && size > 0 ? Math.round(THREE.MathUtils.clamp(size, 64, 8192) / 2) : fallback / 2;
 };
-const atlasParams = { leafCount: 2000, cell: atlasCell('leafTex', 2048), innerCell: atlasCell('innerTex', 1024) };
+const atlasParams = { leafCount: 2000, cell: atlasCell('leafTex', 512), innerCell: atlasCell('innerTex', 256) };
 const createShellAtlas = () => createLeafAtlas({ cell: atlasParams.cell, designCell: 1024, sizeScale: Math.sqrt(840 / atlasParams.leafCount) });
 const atlases = {
   leaf: createShellAtlas(),
