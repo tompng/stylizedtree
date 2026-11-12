@@ -190,6 +190,7 @@ function buildGui() {
   vec(fLook, params.look2, 1, 'farDensity', 0, 2, 0.01);
   vec(fLook, params.edge, 0, 'edgeSoftness', 0, 1, 0.01);
   vec(fLook, params.edge, 1, 'alphaDither', 0, 1, 0.01);
+  vec(fLook, params.edge, 2, 'edgeOutward', 0, 1, 0.01);
   vec(fLook, params.patchFade, 0, 'patchFadeStart', 0, 1, 0.01);
   vec(fLook, params.patchFade, 1, 'patchFade', 0, 1, 0.01);
   vec(fLook, params.patchFade, 2, 'grazingFade', 0, 1, 0.01);

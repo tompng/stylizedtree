@@ -89,7 +89,7 @@ export const params = {
   // patchNormalWeight, farDensity (scales leaf opacity once pixels span several leaves), -,
   // bakedAo (0 ignores the occlusion baked from the other clusters)
   look2: uniform(new THREE.Vector4(0.35, 1.25, 0, 1)),
-  // edgeSoftness, alphaDither, -, -
+  // edgeSoftness, alphaDither, edgeOutward (moves the soft ramp below the cutoff), -
   edge: uniform(new THREE.Vector4(0.6, 0.25, 0, 0)),
   // start (1 - bump where leaves start shrinking), strength, grazing (edge-on patches), -
   patchFade: uniform(new THREE.Vector4(0.15, 1, 1, 0)),
@@ -241,7 +241,7 @@ export function createTreeMaterials(asset, atlases) {
         cutoff: lodA.w,
         far: farParams(atlases.leaf, lodOf(clusterIndex, 2).x),
         patchRand: mix(float(0.5), patchData.y, near),
-        softness: params.edge.x,
+        edge: params.edge,
         threshold: shellFadeThreshold({
           patchUv,
           nPatch,
@@ -283,7 +283,7 @@ export function createTreeMaterials(asset, atlases) {
         cutoff: lodOf(clusterIndex, 0).w,
         far: farParams(atlases.leaf, lodOf(clusterIndex, 2).x),
         patchRand: float(0.5),
-        softness: params.edge.x,
+        edge: params.edge,
         threshold: float(0),
         shrink: params.leafShrink,
       }),
@@ -318,7 +318,7 @@ export function createTreeMaterials(asset, atlases) {
         far: farParams(atlases.inner, lodOf(clusterIndex, 2).y),
         // Differs from the core's 0.5 so their alpha-to-coverage dither does not line up.
         patchRand: float(0.45),
-        softness: params.edge.x,
+        edge: params.edge,
         threshold: innerFadeThreshold({ nProxy, posLocal: restV, center: varying(center), camLocal: I.cam, inner: params.inner, lodFade: lodOf(clusterIndex, 1).x }),
         shrink: params.leafShrink,
       }),

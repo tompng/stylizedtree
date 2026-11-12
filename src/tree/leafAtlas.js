@@ -113,7 +113,9 @@ export function createLeafAtlas({
   const [alpha, rand, stroke, core] = layers.map((ctx) => ctx.getImageData(0, 0, size, size).data);
   const coverage = new Float32Array(size * size);
   for (let i = 0; i < size * size; i++) coverage[i] = alpha[i * 4] / 255;
-  const blurRadius = 3 * texelScale;
+  // A whole-radius box has variance r(r + 1) / 3, not proportional to r², so a radius scaled with
+  // the atlas would blur small atlases more than large ones.
+  const blurRadius = boxRadiusForVariance(4 * texelScale ** 2);
   const blurred = boxBlur(boxBlur(boxBlur(coverage, size, blurRadius), size, blurRadius), size, blurRadius);
   const data = new Uint8Array(size * size * 4);
   for (let i = 0; i < size * size; i++) {
@@ -312,6 +314,15 @@ function drawLeaf([alphaCtx, randCtx, strokeCtx, coreCtx], leaf) {
     coreCtx.fillStyle = gradient;
     coreCtx.fill();
   });
+}
+
+// Radius whose box (boxBlur, fractional radii included) has the given variance in pixels².
+function boxRadiusForVariance(variance) {
+  let whole = 0;
+  while (((whole + 1) * (whole + 2)) / 3 <= variance) whole++;
+  const weightedSquares = (whole * (whole + 1) * (2 * whole + 1)) / 3;
+  const weights = 2 * whole + 1;
+  return whole + (variance * weights - weightedSquares) / (2 * ((whole + 1) ** 2 - variance));
 }
 
 // A fractional radius weights the two samples just outside the whole-pixel window by its fraction.
