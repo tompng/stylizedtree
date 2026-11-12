@@ -14,7 +14,7 @@ fn patchTilt(patchCenter: vec4f, patchData: vec4f, spheres: texture_2d<f32>, win
   let outward = normalize(patchCenter.xyz - center);
   let strength = length(wind.xyz);
   let dir = wind.xyz / max(strength, 0.0001);
-  let lean = cross(outward, dir) * (tiltAmount * strength * st_windGust(patchCenter.xyz, wind, tree) * (0.7 + 0.6 * rand));
+  let lean = cross(outward, dir) * (tiltAmount * strength * (0.7 + 0.6 * rand));
   let a = rand * 40.0;
   let axis = normalize(cross(outward, vec3f(cos(a), 0.37, sin(a))) + vec3f(0.0001));
   let flutter = axis * (flutterAmount * strength / max(patchCenter.w, 0.01) * sin(wind.w * 5.3 + rand * 61.0));

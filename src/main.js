@@ -34,7 +34,7 @@ createEnvironment(scene);
 const treeParams = { ...defaultTreeParams };
 const shellParams = { ...defaultShellParams };
 const lodSettings = { ...defaultLodSettings };
-const env = { sunAzimuth: 140, sunElevation: 38, windStrength: 0.35, windDirection: 20, gust: 0.6, flutter: 0.04, fogDensity: 0.0012 };
+const env = { sunAzimuth: 140, sunElevation: 38, windStrength: 0.35, windDirection: 20, gust: 0.6, flutter: 0.3, fogDensity: 0.0012 };
 const view = {
   layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft', innerBall: true, bakedAo: true,
 };
@@ -215,11 +215,9 @@ function buildGui() {
   fEnv.add(env, 'windStrength', 0, 1.5, 0.01);
   fEnv.add(env, 'windDirection', 0, 360, 1);
   fEnv.add(env, 'gust', 0, 2, 0.01);
-  fEnv.add(env, 'flutter', 0, 0.2, 0.005);
+  fEnv.add(env, 'flutter', 0, 1, 0.005);
   vec(fEnv, params.windBend, 0, 'bend', 0, 1.5, 0.01);
   vec(fEnv, params.windBend, 1, 'lean', 0, 1, 0.01);
-  vec(fEnv, params.windBend, 2, 'press', 0, 1, 0.01);
-  vec(fEnv, params.windBend, 3, 'ripple', 0, 1, 0.01);
   vec(fEnv, params.windPatch, 0, 'patchTilt', 0, 1.5, 0.01);
   fEnv.add(env, 'fogDensity', 0, 0.006, 0.0001);
 }

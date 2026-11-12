@@ -82,27 +82,16 @@ fn st_clusterBend(ci: i32, spheres: texture_2d<f32>, wind: vec4f, tree: vec4f, w
   return cross(twig, dir) * (bendAmount * strength * pivot.w * (st_windGust(center, wind, tree) + sway));
 }
 
-// Offset of rest point p of cluster ci: the bend (rotation about the pivot), a lean that carries
-// the cluster's far end (along the twig) further downwind, a press that flattens its windward side,
-// and a ripple of the local gust through it. `amount` scales it all.
+// Offset of rest point p of cluster ci: the bend (rotation about the pivot) and a lean that carries
+// the cluster's far end (along the twig) further downwind. `amount` scales it all.
 fn st_clusterDeform(p: vec3f, ci: i32, spheres: texture_2d<f32>, wind: vec4f, tree: vec4f, windBend: vec4f, bend: vec3f, amount: f32) -> vec3f {
   let lean = windBend.y;
-  let press = windBend.z;
-  let ripple = windBend.w;
-  let centerRow = textureLoad(spheres, vec2i(ci, 0), 0);
-  let center = centerRow.xyz;
-  let radius = centerRow.w;
+  let center = textureLoad(spheres, vec2i(ci, 0), 0).xyz;
   let pivot = textureLoad(spheres, vec2i(ci, 5), 0);
   let strength = length(wind.xyz);
   let dir = wind.xyz / max(strength, 0.0001);
   let twig = normalize(center - pivot.xyz + vec3f(0.0, 0.0001, 0.0));
-  let gustCenter = st_windGust(center, wind, tree);
-  let gustHere = st_windGust(p, wind, tree);
-  let q = p - center;
-  let push = dir * (strength * pivot.w * (
-    lean * gustCenter * dot(q, twig)
-    + press * gustHere * max(-dot(q, dir), 0.0)
-    + ripple * (gustHere - gustCenter) * radius));
+  let push = dir * (strength * pivot.w * lean * st_windGust(center, wind, tree) * dot(p - center, twig));
   return (st_rotateVector(p - pivot.xyz, bend * amount) + pivot.xyz - p) + push * amount;
 }
 

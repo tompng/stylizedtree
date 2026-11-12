@@ -103,8 +103,8 @@ export const params = {
   shadow: uniform(new THREE.Vector4(0.8, 0.35, 0, 0)),
   // strength, breakup, density, softness (ground shadow)
   groundShadow: uniform(new THREE.Vector4(0.85, 0.6, 0.85, 0.3)),
-  // bend, lean, press, ripple (cluster response to wind, st_clusterDeform)
-  windBend: uniform(new THREE.Vector4(0.35, 0.25, 0.3, 0.25)),
+  // bend, lean, -, - (cluster response to wind, st_clusterDeform)
+  windBend: uniform(new THREE.Vector4(0.35, 0.25, 0, 0)),
   // tilt (shell patches leaning downwind), -, -, -
   windPatch: uniform(new THREE.Vector4(0.5, 0, 0, 0)),
   // density
