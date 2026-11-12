@@ -40,11 +40,17 @@ const view = {
 };
 // Leaves are packed close to the densest non-touching arrangement, so their count is set by their
 // size: about 840 per sphere at sizeScale 1, scaling with 1 / size².
-const atlasParams = { leafCount: 2000 };
-const createShellAtlas = () => createLeafAtlas({ sizeScale: Math.sqrt(840 / atlasParams.leafCount) });
+// ?leafTex=1024&innerTex=512 sets the atlas sizes in texels (2x2 cells); the leaves stay the same.
+const urlParams = new URLSearchParams(location.search);
+const atlasCell = (name, fallback) => {
+  const size = Number(urlParams.get(name));
+  return Number.isFinite(size) && size > 0 ? Math.round(THREE.MathUtils.clamp(size, 64, 8192) / 2) : fallback / 2;
+};
+const atlasParams = { leafCount: 2000, cell: atlasCell('leafTex', 2048), innerCell: atlasCell('innerTex', 1024) };
+const createShellAtlas = () => createLeafAtlas({ cell: atlasParams.cell, designCell: 1024, sizeScale: Math.sqrt(840 / atlasParams.leafCount) });
 const atlases = {
   leaf: createShellAtlas(),
-  inner: createLeafAtlas({ seed: 23, cell: 512, leafLength: [0.13, 0.22] }),
+  inner: createLeafAtlas({ seed: 23, cell: atlasParams.innerCell, designCell: 512, leafLength: [0.13, 0.22] }),
 };
 
 let asset = null;
@@ -245,7 +251,7 @@ function updateHud(focus) {
     `clusters  ${e.shellClusters} in shell   draws shell/core/inner ${e.clusterDraws.join(' / ')}`,
     `wood   detail ${e.woodDetail}  morph ${fmt(e.woodMorph)}`,
     `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
-    `atlas  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,
+    `atlas  ${atlasParams.cell * 2}px (inner ${atlasParams.innerCell * 2}px)  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,
   ];
   hud.textContent = rows.join('\n');
 }

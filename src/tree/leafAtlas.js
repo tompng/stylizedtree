@@ -13,9 +13,12 @@ const DISC = 0.96;
 // B = per-leaf brush gradient, A = leaf core (1 at each leaf center, falling to 0 just past its
 // outline; a rising threshold on it shrinks every leaf toward its own center).
 // G/B are 0.5 outside leaves so mips stay neutral.
+// The gap, blur and dilation are in pixels of a `designCell` cell and scale with `cell`, so the same
+// seed gives the same leaves at any resolution.
 export function createLeafAtlas({
   seed = 11,
   cell = 1024,
+  designCell = cell,
   sizeScale = 1,
   candidates = Math.round(40000 / sizeScale ** 2),
   leafLength = [0.07 * sizeScale, 0.12 * sizeScale],
@@ -42,8 +45,9 @@ export function createLeafAtlas({
   }
 
   const R = (cell / 2) * DISC;
+  const texelScale = cell / designCell;
   // The projection never maps a radian to fewer than R / 2 pixels.
-  const gap = gapPixels / (R / 2);
+  const gap = (gapPixels * texelScale) / (R / 2);
   const leafCounts = [];
   let widthSum = 0;
   for (let pattern = 0; pattern < 2; pattern++) {
@@ -92,7 +96,7 @@ export function createLeafAtlas({
         ctx.rect(ox, oy, cell, cell);
         ctx.clip();
       }
-      const dilate = 8 / (R * 0.6);
+      const dilate = (8 * texelScale) / (R * 0.6);
       for (const leaf of placed) {
         withLeafFrame(randCtx, leaf, () => {
           leafPath(randCtx, leaf.length, leaf.width);
@@ -109,7 +113,8 @@ export function createLeafAtlas({
   const [alpha, rand, stroke, core] = layers.map((ctx) => ctx.getImageData(0, 0, size, size).data);
   const coverage = new Float32Array(size * size);
   for (let i = 0; i < size * size; i++) coverage[i] = alpha[i * 4] / 255;
-  const blurred = boxBlur(boxBlur(boxBlur(coverage, size, 3), size, 3), size, 3);
+  const blurRadius = 3 * texelScale;
+  const blurred = boxBlur(boxBlur(boxBlur(coverage, size, blurRadius), size, blurRadius), size, blurRadius);
   const data = new Uint8Array(size * size * 4);
   for (let i = 0; i < size * size; i++) {
     data[i * 4] = Math.round(blurred[i] * 255);
@@ -309,27 +314,24 @@ function drawLeaf([alphaCtx, randCtx, strokeCtx, coreCtx], leaf) {
   });
 }
 
+// A fractional radius weights the two samples just outside the whole-pixel window by its fraction.
 function boxBlur(src, size, radius) {
   const tmp = new Float32Array(src.length);
   const dst = new Float32Array(src.length);
+  const whole = Math.floor(radius);
+  const frac = radius - whole;
   const span = radius * 2 + 1;
   const at = (i) => Math.min(size - 1, Math.max(0, i));
-  for (let y = 0; y < size; y++) {
-    const row = y * size;
+  const blurLine = (input, output, base, step) => {
     let sum = 0;
-    for (let k = -radius; k <= radius; k++) sum += src[row + at(k)];
-    for (let x = 0; x < size; x++) {
-      tmp[row + x] = sum / span;
-      sum += src[row + at(x + radius + 1)] - src[row + at(x - radius)];
+    for (let k = -whole; k <= whole; k++) sum += input[base + at(k) * step];
+    for (let i = 0; i < size; i++) {
+      const outside = input[base + at(i - whole - 1) * step] + input[base + at(i + whole + 1) * step];
+      output[base + i * step] = (sum + frac * outside) / span;
+      sum += input[base + at(i + whole + 1) * step] - input[base + at(i - whole) * step];
     }
-  }
-  for (let x = 0; x < size; x++) {
-    let sum = 0;
-    for (let k = -radius; k <= radius; k++) sum += tmp[at(k) * size + x];
-    for (let y = 0; y < size; y++) {
-      dst[y * size + x] = sum / span;
-      sum += tmp[at(y + radius + 1) * size + x] - tmp[at(y - radius) * size + x];
-    }
-  }
+  };
+  for (let y = 0; y < size; y++) blurLine(src, tmp, y * size, 1);
+  for (let x = 0; x < size; x++) blurLine(tmp, dst, x, size);
   return dst;
 }
