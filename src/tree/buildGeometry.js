@@ -283,11 +283,34 @@ function patchMagnification(cluster, rhombus, i, j, n) {
   return Math.sqrt(surfaceArea / sphereArea);
 }
 
+// Mean of the curl profile (s² + t²) / 2 over a patch drawn with k segments, as its triangles
+// interpolate it, weighted by the bump 16x(1-x)y(1-y) of shell_fade.wgsl that keeps leaves toward
+// the patch center. The profile is a sum of one function of u and one of v, which the triangles
+// interpolate piecewise-linearly along each axis whichever diagonal they use.
+function flareMean(k) {
+  const profile = (x) => (2 * x - 1) ** 2 / 2;
+  const samples = 64 * k;
+  let sum = 0;
+  let weight = 0;
+  for (let i = 0; i < samples; i++) {
+    const x = (i + 0.5) / samples;
+    const cell = Math.min(Math.floor(x * k), k - 1);
+    const f = x * k - cell;
+    const w = x * (1 - x);
+    sum += (profile(cell / k) * (1 - f) + profile((cell + 1) / k) * f) * w;
+    weight += w;
+  }
+  return (2 * sum) / weight;
+}
+
 // At rest (near offset 0) the patches tile each cluster surface exactly, edge to edge, and every
 // fragment looks up the leaf atlas from its own surface direction, so the tiled shell and the
 // core mesh show the same leaves. Up close each patch is scaled up around its center (overlap),
 // pushed inward (depth) and curled (flare); its leaves stay attached to it, so their size follows
-// the patch's scale times the surface magnification times the depth scale.
+// the patch's scale times the surface magnification times the depth scale. The curl is shifted
+// along the normal by its mean at each grid level (flareMean), so neither curling nor coarsening
+// the grid moves the patch's leaves in or out on average: with one segment only the corners carry
+// the curl, which would otherwise lift the whole flat patch by its full height.
 //
 // Each patch is stored once per grid level, from gridSegments segments down to one (patchData.z),
 // and a level's vertices geomorph (morph* attributes) onto the next coarser representation so that
@@ -314,6 +337,7 @@ function buildShell(tree, occlusion, params, tiling) {
   const levelIndices = Array.from({ length: segments + 1 }, () => tree.clusters.map(() => []));
   const { topTriangles } = tiling;
   const scale = Math.sqrt(Math.max(params.overlap, 1));
+  const flareMeans = Array.from({ length: segments + 1 }, (_, k) => (k > 0 ? flareMean(k) : 0));
   let maxOffset = 0;
   let vertex = 0;
 
@@ -343,33 +367,36 @@ function buildShell(tree, occlusion, params, tiling) {
           const center = clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + 0.5) / n, (j + 0.5) / n));
           const nearCenter = center.clone().sub(cluster.center).multiplyScalar(nearScale).add(cluster.center);
           const farAt = (su, sv) => clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + su) / n, (j + sv) / n));
-          const nearAt = (su, sv, far = farAt(su, sv)) => {
+          const nearAt = (su, sv, k, far = farAt(su, sv)) => {
             const s = 2 * su - 1;
             const t = 2 * sv - 1;
+            const curl = (s * s + t * t) / 2 - flareMeans[k];
             return far.clone().sub(center).multiplyScalar(grow).add(center)
               .sub(cluster.center).multiplyScalar(nearScale).add(cluster.center)
-              .addScaledVector(clusterNormal(cluster, far), flareSign * flare * cluster.radius * nearScale * (s * s + t * t) * 0.5);
-          };
-          const sampleAt = (su, sv) => {
-            const far = farAt(su, sv);
-            const nProxy = clusterNormal(cluster, far);
-            const near = nearAt(su, sv, far);
-            const e = 1e-3;
-            const normal = nearAt(su + e, sv).sub(nearAt(su - e, sv)).cross(nearAt(su, sv + e).sub(nearAt(su, sv - e))).normalize();
-            if (normal.dot(nProxy) < 0) normal.negate();
-            const ao = occlusion.occlusion(far.clone().addScaledVector(nProxy, 0.03), nProxy, ci);
-            return { far, near, offset: near.clone().sub(far), normal, ao, proxy: nProxy };
+              .addScaledVector(clusterNormal(cluster, far), flareSign * flare * cluster.radius * nearScale * curl);
           };
           const cache = new Map();
+          const surfaceAt = (su, sv) => {
+            const key = `${su * 720},${sv * 720}`;
+            if (!cache.has(key)) {
+              const far = farAt(su, sv);
+              const proxy = clusterNormal(cluster, far);
+              const ao = occlusion.occlusion(far.clone().addScaledVector(proxy, 0.03), proxy, ci);
+              cache.set(key, { far, proxy, ao });
+            }
+            return cache.get(key);
+          };
+          const sampleAt = (su, sv, k) => {
+            const { far, proxy, ao } = surfaceAt(su, sv);
+            const near = nearAt(su, sv, k, far);
+            const e = 1e-3;
+            const normal = nearAt(su + e, sv, k).sub(nearAt(su - e, sv, k)).cross(nearAt(su, sv + e, k).sub(nearAt(su, sv - e, k))).normalize();
+            if (normal.dot(proxy) < 0) normal.negate();
+            return { far, near, offset: near.clone().sub(far), normal, ao, proxy };
+          };
           const grids = [];
           for (let k = 1; k <= segments; k++) {
-            grids[k] = Array.from({ length: (k + 1) ** 2 }, (_, idx) => {
-              const iu = idx % (k + 1);
-              const iv = Math.floor(idx / (k + 1));
-              const key = `${(iu * 720) / k},${(iv * 720) / k}`;
-              if (!cache.has(key)) cache.set(key, sampleAt(iu / k, iv / k));
-              return cache.get(key);
-            });
+            grids[k] = Array.from({ length: (k + 1) ** 2 }, (_, idx) => sampleAt((idx % (k + 1)) / k, Math.floor(idx / (k + 1)) / k, k));
           }
           const antiDiagonal = tiling.quartered && i + j === n - 1;
           const onGrid = (k, su, sv, name) => {
