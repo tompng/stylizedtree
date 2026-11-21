@@ -131,6 +131,7 @@ function buildGui() {
   }
   const fStageParams = fLod.addFolder('stage params').close();
   fStageParams.add(lodSettings, 'cutoff', 0, 1, 0.01);
+  fStageParams.add(lodSettings, 'innerMaxLevel', 0, 8, 1);
 
   const fTree = gui.addFolder('Tree (rebuild)').close();
   fTree.add(treeParams, 'seed', 1, 200, 1).onFinishChange(rebuild);

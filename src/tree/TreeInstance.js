@@ -160,7 +160,7 @@ export class TreeInstance {
       this.clusterLod[ci * 2].set(innerFade, shell.level, shell.morph, lodSettings.cutoff);
       this.clusterLod[ci * 2 + 1].set(farScale, 0, 0, 0);
       shellLevels[ci] = shell.level;
-      innerLevels[ci] = showInner && innerFade < 1 ? shell.level : -1;
+      innerLevels[ci] = showInner && innerFade < 1 ? Math.min(shell.level, lodSettings.innerMaxLevel) : -1;
     });
     e.clusterDraws = [
       setClusterGroups(this.shell, asset.shell.ranges, shellLevels),

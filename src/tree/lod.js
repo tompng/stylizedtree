@@ -17,6 +17,8 @@ export const defaultLodSettings = {
   woodPolyEnd: 4.5,
   innerFadeStart: 3.8,
   innerFadeEnd: 4.4,
+  // The inner layer draws the shell's grid level up to this one (0 = the rhombus cards).
+  innerMaxLevel: 1,
   twigFadeStart: 3.8,
   twigFadeEnd: 5.0,
   limbFadeStart: 7.0,
