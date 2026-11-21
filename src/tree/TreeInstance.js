@@ -83,7 +83,9 @@ export class TreeInstance {
     this.clusterLevels = { shell: new Array(clusterCount), core: new Array(clusterCount), inner: new Array(clusterCount) };
     this.shell = this.addMesh(shareGeometry(asset.shell.geometry), [materials.shell], 'shell');
     this.core = this.addMesh(shareGeometry(asset.core.geometry), [materials.core], 'core');
-    this.inner = this.addMesh(shareGeometry(asset.inner.geometry), [materials.inner], 'inner');
+    this.inner = this.addMesh(shareGeometry(asset.shell.geometry), [materials.inner], 'inner');
+    // Drawn after the shell in front of it, so the depth test drops what the shell already covers.
+    this.inner.renderOrder = 1;
     for (const mesh of [this.shell, this.core, this.inner]) mesh.userData.clusterLod = this.clusterLod;
     this.wood = this.addMesh(shareGeometry(asset.wood.geometry), materials.wood, 'wood');
     this.decal = this.addMesh(decalGeometry, materials.decal, 'wood');
@@ -153,15 +155,15 @@ export class TreeInstance {
       const core = steppedLevel(c.corePoly, asset.core.maxLevel);
       this.clusterLod[ci * 3].set(c.near, shell.level, shell.morph, c.cutoff);
       this.clusterLod[ci * 3 + 1].set(c.innerFade, core.level, core.morph, 0);
-      this.clusterLod[ci * 3 + 2].set(farCoverageScale(atlases.leaf, c.cutoff), farCoverageScale(atlases.inner, c.cutoff), 0, 0);
+      this.clusterLod[ci * 3 + 2].set(farCoverageScale(atlases.leaf, c.cutoff), 0, 0, 0);
       shellLevels[ci] = c.shellActive ? shell.level : -1;
       coreLevels[ci] = c.shellActive ? -1 : core.level;
-      innerLevels[ci] = showInner && c.innerFade < 1 ? 0 : -1;
+      innerLevels[ci] = showInner && c.innerFade < 1 ? shell.level : -1;
     });
     e.clusterDraws = [
       setClusterGroups(this.shell, asset.shell.ranges, shellLevels),
       setClusterGroups(this.core, asset.core.ranges, coreLevels),
-      setClusterGroups(this.inner, asset.inner.ranges, innerLevels),
+      setClusterGroups(this.inner, asset.shell.ranges, innerLevels),
     ];
     e.shellClusters = shellLevels.filter((l) => l >= 0).length;
 

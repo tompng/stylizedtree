@@ -5,7 +5,6 @@ import { clusterNormal, clusterSurfacePoint } from './clusterShape.js';
 import {
   RHOMBUS_HALVES, RHOMBUS_POINTS, RHOMBUS_QUARTERS, interpolateOnTriangles, rhombusPoint, triacontahedronRhombi,
 } from './clusterTiling.js';
-import { buildIcosphere } from './icosphere.js';
 
 export const defaultShellParams = {
   patchDivisions: 2,
@@ -19,8 +18,6 @@ export const defaultShellParams = {
   leafSizeCompensation: true,
   gridSegments: 3,
 };
-
-const INNER_LEVEL = 1;
 
 class AttributeWriter {
   constructor(count, layout) {
@@ -68,31 +65,31 @@ class AttributeWriter {
 export function buildTreeAsset(tree, shellParams) {
   const occlusion = new ClusterOcclusion(tree);
   const tiling = clusterTilings(tree, shellParams, occlusion);
+  const innerTurns = innerTurnQuaternions(tree);
   return {
     tree,
     crownRadius: Math.max(tree.crownRadii.x, tree.crownRadii.y),
-    sphereTexture: buildSphereTexture(tree),
+    sphereTexture: buildSphereTexture(tree, innerTurns),
     counts: new THREE.Vector4(tree.clusters.length, tree.woodChains.length, 0, 0),
     crownInfo: new THREE.Vector4(tree.crownCenter.x, tree.crownCenter.y, tree.crownCenter.z, Math.max(tree.crownRadii.x, tree.crownRadii.z)),
     core: buildCore(tree, tiling),
-    inner: buildInner(tree, shellParams),
-    shell: buildShell(tree, occlusion, shellParams, tiling),
+    shell: buildShell(tree, occlusion, shellParams, tiling, innerTurns),
     wood: buildWood(tree, occlusion),
   };
 }
 
 export function disposeTreeAsset(asset) {
   asset.sphereTexture.dispose();
-  for (const part of [asset.core, asset.inner, asset.shell, asset.wood]) part.geometry.dispose();
+  for (const part of [asset.core, asset.shell, asset.wood]) part.geometry.dispose();
 }
 
 // Rows: 0 = center + shadow radius, 1 = wood chain points, 2 = axes, 3 = leaf atlas pattern,
 // 4 = leaf atlas rotation quaternion, 5 = wind pivot (where the cluster's twig forks off its limb)
-// + flexibility.
-function buildSphereTexture(tree) {
+// + flexibility, 6 = inner layer turn quaternion (inner_place.wgsl).
+function buildSphereTexture(tree, innerTurns) {
   const rng = new Rng(tree.seed * 13 + 5);
   const width = Math.max(tree.clusters.length, tree.woodChains.length, 1);
-  const height = 6;
+  const height = 7;
   const data = new Float32Array(width * height * 4);
   const put = (row, column, values) => data.set(values, (width * row + column) * 4);
   tree.clusters.forEach((c, i) => {
@@ -101,6 +98,7 @@ function buildSphereTexture(tree) {
     put(3, i, [rng.next() < 0.5 ? 0 : 1, 0, 0, 0]);
     put(4, i, randomQuaternion(rng));
     put(5, i, [c.pivot.x, c.pivot.y, c.pivot.z, 1]);
+    put(6, i, innerTurns[i].toArray());
   });
   tree.woodChains.forEach((s, i) => put(1, i, [s.center.x, s.center.y, s.center.z, s.radius]));
   const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
@@ -109,6 +107,11 @@ function buildSphereTexture(tree) {
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
   return texture;
+}
+
+function innerTurnQuaternions(tree) {
+  const rng = new Rng(tree.seed * 17 + 9);
+  return tree.clusters.map(() => new THREE.Quaternion(...randomQuaternion(rng)));
 }
 
 // Uniformly distributed rotation (Shoemake, Graphics Gems III), as [x, y, z, w].
@@ -245,26 +248,6 @@ function concatLevels(levelIndices) {
   return { indices, ranges };
 }
 
-// Sits at the deepest shell layer, where the shell's depth offset pushes patches to.
-function buildInner(tree, params) {
-  const ico = buildIcosphere(INNER_LEVEL);
-  const perCluster = ico.dirs.length;
-  const { clusters } = tree;
-  const w = new AttributeWriter(clusters.length * perCluster, { position: 3, normal: 3, cCenter: 4 });
-  clusters.forEach((cluster, ci) => {
-    ico.dirs.forEach((dir, vi) => {
-      const index = ci * perCluster + vi;
-      const p = clusterSurfacePoint(cluster, dir, 1 - params.depth);
-      w.setVector('position', index, p);
-      w.setVector('normal', index, clusterNormal(cluster, p));
-      w.setVector('cCenter', index, cluster.center, ci);
-    });
-  });
-  const faces = ico.levels[INNER_LEVEL];
-  const { indices, ranges } = concatLevels([clusters.map((_, ci) => faces.map((v) => ci * perCluster + v))]);
-  return { geometry: w.toGeometry(indices), ranges };
-}
-
 // Linear scale from the leaf atlas (directions on the unit sphere) to the cluster surface over one
 // patch: lobes and the ellipsoid axes enlarge or shrink the leaves drawn there.
 function patchMagnification(cluster, rhombus, i, j, n) {
@@ -281,6 +264,16 @@ function patchMagnification(cluster, rhombus, i, j, n) {
     }
   }
   return Math.sqrt(surfaceArea / sphereArea);
+}
+
+// The inner layer turns the shell about the cluster center (inner_place.wgsl), which leaves the
+// patches off the lobed surface; this is how far along its turned radial direction a patch then
+// moves for its center to sit at the deepest shell layer (1 - depth of the surface) there.
+function innerLayerShift(cluster, nearCenter, turn, depth) {
+  const radial = nearCenter.clone().sub(cluster.center);
+  const turned = radial.clone().applyQuaternion(turn);
+  const target = clusterSurfacePoint(cluster, turned.divide(cluster.axes).normalize(), 1 - depth);
+  return target.distanceTo(cluster.center) - radial.length();
 }
 
 // Mean of the curl profile (s² + t²) / 2 over a patch drawn with k segments, as its triangles
@@ -321,7 +314,7 @@ function flareMean(k) {
 // lines on either side move onto one line of the coarser grid, the strip between them degenerates,
 // and every other cell becomes a coarser cell, patch coordinates included. All cells of a patch
 // share one diagonal direction, chosen so that the one-segment cell lies flat on the core triangles.
-function buildShell(tree, occlusion, params, tiling) {
+function buildShell(tree, occlusion, params, tiling, innerTurns) {
   const rng = new Rng(tree.seed * 7 + 3);
   const n = params.patchDivisions;
   const segments = Math.max(1, Math.round(params.gridSegments));
@@ -332,7 +325,7 @@ function buildShell(tree, occlusion, params, tiling) {
   for (let k = 1; k <= segments; k++) perPatch += (k + 1) ** 2;
   const w = new AttributeWriter(patchCount * perPatch, {
     position: 3, nearOffset: 3, patchCenter: 4, patchUv: 2, patchData: 4, nPatchAo: 4,
-    morphFar: 3, morphOffset: 3, morphNormalAo: 4, morphUv: 2, proxyNormal: 3, morphProxy: 3,
+    morphFar: 3, morphOffset: 3, morphNormalAo: 4, morphUv: 2, proxyNormal: 3, morphProxy: 3, innerShift: 1,
   });
   const levelIndices = Array.from({ length: segments + 1 }, () => tree.clusters.map(() => []));
   const { topTriangles } = tiling;
@@ -366,6 +359,7 @@ function buildShell(tree, occlusion, params, tiling) {
           const flareSign = params.flareDirection === 'inward' || (params.flareDirection === 'random' && flip) ? -1 : 1;
           const center = clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + 0.5) / n, (j + 0.5) / n));
           const nearCenter = center.clone().sub(cluster.center).multiplyScalar(nearScale).add(cluster.center);
+          const innerShift = innerLayerShift(cluster, nearCenter, innerTurns[ci], params.depth);
           const farAt = (su, sv) => clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + su) / n, (j + sv) / n));
           const nearAt = (su, sv, k, far = farAt(su, sv)) => {
             const s = 2 * su - 1;
@@ -442,6 +436,7 @@ function buildShell(tree, occlusion, params, tiling) {
               w.setVector('patchCenter', vertex, nearCenter, patchRadius);
               w.set('patchUv', vertex, su, sv);
               w.set('patchData', vertex, depth, rand, k, ci);
+              w.set('innerShift', vertex, innerShift);
               w.setVector('nPatchAo', vertex, value.normal, value.ao);
               w.setVector('morphFar', vertex, target.far);
               w.setVector('morphOffset', vertex, target.offset);

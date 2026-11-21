@@ -12,7 +12,7 @@ fn leafSphereSample(tex: texture_2d<f32>, samp: sampler, p: vec3f, clusterIndex:
   let q = textureLoad(spheres, vec2i(ci, 4), 0);
 
   let d0 = normalize((p - c) / a);
-  let d = d0 + 2.0 * cross(q.xyz, cross(q.xyz, d0) + q.w * d0);
+  let d = st_rotateQuat(d0, q);
   let upperUv = (vec2f(0.5, pattern + 0.5) + 0.5 * 0.96 * d.xz / sqrt(max(1.0 + d.y, 0.0001))) * 0.5;
   let lowerUv = (vec2f(1.5, pattern + 0.5) + 0.5 * 0.96 * d.xz / sqrt(max(1.0 - d.y, 0.0001))) * 0.5;
   let lower = d.y < 0.0;

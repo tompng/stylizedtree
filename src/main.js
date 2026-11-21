@@ -36,22 +36,19 @@ const shellParams = { ...defaultShellParams };
 const lodSettings = { ...defaultLodSettings };
 const env = { sunAzimuth: 140, sunElevation: 38, windStrength: 0.35, windDirection: 20, gust: 0.6, flutter: 0.3, fogDensity: 0.0012 };
 const view = {
-  layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft', innerBall: true, bakedAo: true,
+  layout: 'single', tint: 0, dolly: false, dollyMin: 9, dollyMax: 1200, dollyPeriod: 24, timeScale: 1, style: 'soft', innerLayer: true, bakedAo: true,
 };
 // Leaves are packed close to the densest non-touching arrangement, so their count is set by their
 // size: about 840 per sphere at sizeScale 1, scaling with 1 / size².
-// ?leafTex=2048&innerTex=1024 sets the atlas sizes in texels (2x2 cells); the leaves stay the same.
+// ?leafTex=2048 sets the atlas size in texels (2x2 cells); the leaves stay the same.
 const urlParams = new URLSearchParams(location.search);
-const atlasCell = (name, fallback) => {
-  const size = Number(urlParams.get(name));
+const atlasCell = (fallback) => {
+  const size = Number(urlParams.get('leafTex'));
   return Number.isFinite(size) && size > 0 ? Math.round(THREE.MathUtils.clamp(size, 64, 8192) / 2) : fallback / 2;
 };
-const atlasParams = { leafCount: 2000, cell: atlasCell('leafTex', 512), innerCell: atlasCell('innerTex', 256) };
+const atlasParams = { leafCount: 2000, cell: atlasCell(512) };
 const createShellAtlas = () => createLeafAtlas({ cell: atlasParams.cell, designCell: 1024, sizeScale: Math.sqrt(840 / atlasParams.leafCount) });
-const atlases = {
-  leaf: createShellAtlas(),
-  inner: createLeafAtlas({ seed: 23, cell: atlasParams.innerCell, designCell: 512, leafLength: [0.13, 0.22] }),
-};
+const atlases = { leaf: createShellAtlas() };
 
 let asset = null;
 let materials = null;
@@ -196,7 +193,7 @@ function buildGui() {
   vec(fLook, params.patchFade, 2, 'grazingFade', 0, 1, 0.01);
   vec(fLook, params.leafShrink, 0, 'shrinkLeafVariation', 0, 1, 0.01);
   vec(fLook, params.leafShrink, 1, 'shrinkSoftness', 0.01, 0.5, 0.01);
-  fLook.add(view, 'innerBall');
+  fLook.add(view, 'innerLayer');
   fLook.add(view, 'bakedAo').onChange((on) => params.look2.value.setW(on ? 1 : 0));
   vec(fLook, params.inner, 0, 'innerShade', 0, 1, 0.01);
   vec(fLook, params.inner, 1, 'innerRimWidth', 0.05, 1, 0.01);
@@ -252,7 +249,7 @@ function updateHud(focus) {
     `clusters  ${e.shellClusters} in shell   draws shell/core/inner ${e.clusterDraws.join(' / ')}`,
     `wood   detail ${e.woodDetail}  morph ${fmt(e.woodMorph)}`,
     `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
-    `atlas  ${atlasParams.cell * 2}px (inner ${atlasParams.innerCell * 2}px)  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,
+    `atlas  ${atlasParams.cell * 2}px  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,
   ];
   hud.textContent = rows.join('\n');
 }
@@ -286,7 +283,7 @@ function frame() {
     wind: { strength: env.windStrength, direction: THREE.MathUtils.degToRad(env.windDirection), gust: env.gust, flutter: env.flutter },
     time: elapsed,
     tintAmount: view.tint,
-    showInner: view.innerBall,
+    showInner: view.innerLayer,
     atlases,
   };
   for (const tree of trees) tree.update(ctx);

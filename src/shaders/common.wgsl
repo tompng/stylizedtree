@@ -47,6 +47,10 @@ fn st_shellMorph(patchData: vec4f, lodA: vec4f) -> f32 {
   return select(0.0, lodA.z, abs(patchData.z - lodA.y) < 0.5);
 }
 
+fn st_rotateQuat(v: vec3f, q: vec4f) -> vec3f {
+  return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
 // Rotation by rotation vector w (axis * angle), Rodrigues' formula.
 fn st_rotateVector(v: vec3f, w: vec3f) -> vec3f {
   let angle = length(w);
