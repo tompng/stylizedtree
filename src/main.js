@@ -5,7 +5,7 @@ import { createEnvironment } from './environment.js';
 import { Rng } from './math.js';
 import { buildTreeAsset, defaultShellParams, disposeTreeAsset } from './tree/buildGeometry.js';
 import { defaultTreeParams, generateTree } from './tree/generateTree.js';
-import { createLeafAtlas } from './tree/leafAtlas.js';
+import { createLeafAtlas, updateKeptTexture } from './tree/leafAtlas.js';
 import { defaultLodSettings } from './tree/lod.js';
 import { TreeInstance } from './tree/TreeInstance.js';
 import { createTreeMaterials, disposeTreeMaterials, palette, params, stylePresets } from './tree/treeMaterials.js';
@@ -124,14 +124,13 @@ function buildGui() {
   fLod.add(lodSettings, 'referencePixels', 100, 1000, 10);
   const fStages = fLod.addFolder('stage ranges (L)').close();
   for (const key of [
-    'collapseStart', 'collapseEnd', 'gridLevelSpacing', 'woodPolyStart', 'woodPolyEnd', 'corePolyStart', 'corePolyEnd',
+    'mergeEnd', 'gridLevelSpacing', 'woodPolyStart', 'woodPolyEnd',
     'innerFadeStart', 'innerFadeEnd', 'twigFadeStart', 'twigFadeEnd', 'limbFadeStart', 'limbFadeEnd',
   ]) {
     fStages.add(lodSettings, key, -3, 10, 0.05);
   }
   const fStageParams = fLod.addFolder('stage params').close();
-  fStageParams.add(lodSettings, 'cutoffNear', 0, 1, 0.01);
-  fStageParams.add(lodSettings, 'cutoffFar', 0, 1, 0.01);
+  fStageParams.add(lodSettings, 'cutoff', 0, 1, 0.01);
 
   const fTree = gui.addFolder('Tree (rebuild)').close();
   fTree.add(treeParams, 'seed', 1, 200, 1).onFinishChange(rebuild);
@@ -184,7 +183,7 @@ function buildGui() {
   vec(fLook, params.look, 2, 'hueVariation', 0, 1, 0.01);
   vec(fLook, params.look, 3, 'skyAmbient', 0, 1, 0.01);
   vec(fLook, params.look2, 0, 'patchNormalWeight', 0, 1, 0.01);
-  vec(fLook, params.look2, 1, 'farDensity', 0, 2, 0.01);
+  vec(fLook, params.look2, 1, 'farDensity', 0, 4, 0.01);
   vec(fLook, params.edge, 0, 'edgeSoftness', 0, 1, 0.01);
   vec(fLook, params.edge, 1, 'alphaDither', 0, 1, 0.01);
   vec(fLook, params.edge, 2, 'edgeOutward', 0, 1, 0.01);
@@ -243,10 +242,8 @@ function updateHud(focus) {
   const fmt = (x, d = 2) => x.toFixed(d);
   const rows = [
     `L ${fmt(e.level)}   crown radius ${fmt(focus.radiusPx, 0)}px   dist ${fmt(focus.distance, 0)}m`,
-    e.shellActive
-      ? `shell  near ${fmt(e.near)}  grid ${e.shellLevel}  morph ${fmt(e.shellMorph)}  patches ${asset.shell.patchCount}  cutoff ${fmt(e.cutoff)}`
-      : `core   level ${e.coreLevel}  morph ${fmt(e.coreMorph)}`,
-    `clusters  ${e.shellClusters} in shell   draws shell/core/inner ${e.clusterDraws.join(' / ')}`,
+    `shell  ${e.shellLevel > 0 ? `grid ${e.shellLevel}` : 'cards'}  morph ${fmt(e.shellMorph)}  patches ${asset.shell.patchCount}`,
+    `draws  shell/inner ${e.clusterDraws.join(' / ')}`,
     `wood   detail ${e.woodDetail}  morph ${fmt(e.woodMorph)}`,
     `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
     `atlas  ${atlasParams.cell * 2}px  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,
@@ -286,6 +283,7 @@ function frame() {
     showInner: view.innerLayer,
     atlases,
   };
+  updateKeptTexture(atlases.leaf, lodSettings.cutoff, params.leafShrink.value.x, params.leafShrink.value.y);
   for (const tree of trees) tree.update(ctx);
 
   renderer.render(scene, camera);

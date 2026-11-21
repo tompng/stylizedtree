@@ -135,8 +135,59 @@ export function createLeafAtlas({
     // Typical radians-to-texels scale of the projection.
     leafWidthTexels: (widthSum / (leafCounts[0] + leafCounts[1])) * R * 0.6,
     ...coverageStats(blurred, size, cell, R),
+    shrinkSamples: shrinkSamples(blurred, data, size, cell, R),
+    keptTexture: createKeptTexture(),
   };
+  texture.addEventListener('dispose', () => texture.userData.keptTexture.dispose());
   return texture;
+}
+
+// (coverage, core, rand) of every other texel inside the discs that a cutoff could keep.
+function shrinkSamples(coverage, data, size, cell, R) {
+  const samples = [];
+  for (let y = 0; y < size; y += 2) {
+    for (let x = 0; x < size; x += 2) {
+      if (Math.hypot((x % cell) + 0.5 - cell / 2, (y % cell) + 0.5 - cell / 2) > R) continue;
+      const i = y * size + x;
+      if (coverage[i] > 0.02) samples.push(coverage[i], data[i * 4 + 3] / 255, data[i * 4 + 1] / 255);
+    }
+  }
+  return new Float32Array(samples);
+}
+
+const KEPT_BINS = 64;
+
+function createKeptTexture() {
+  const texture = new THREE.DataTexture(new Uint8Array(KEPT_BINS), KEPT_BINS, 1, THREE.RedFormat, THREE.UnsignedByteType);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.userData.key = '';
+  return texture;
+}
+
+// Fills the atlas's keptTexture: at u = threshold, the fraction of the leaf texels above `cutoff`
+// that the shrink threshold keeps (st_leafSampleGrad, same core and ramp), for minified layers
+// whose averaged core no longer marks where the leaf centers are.
+export function updateKeptTexture(atlas, cutoff, leafVariation, shrinkSoftness) {
+  const { shrinkSamples: samples, keptTexture } = atlas.userData;
+  const key = `${cutoff},${leafVariation},${shrinkSoftness}`;
+  if (keptTexture.userData.key === key) return;
+  keptTexture.userData.key = key;
+  const softness = Math.max(shrinkSoftness, 0.0001);
+  const kept = new Float64Array(KEPT_BINS);
+  let count = 0;
+  for (let i = 0; i < samples.length; i += 3) {
+    if (samples[i] < cutoff) continue;
+    const core = samples[i + 1] * lerp(1, samples[i + 2], leafVariation);
+    for (let b = 0; b < KEPT_BINS; b++) {
+      const threshold = b / (KEPT_BINS - 1);
+      kept[b] += clamp((core - threshold * (1 + softness)) / softness + 1, 0, 1);
+    }
+    count++;
+  }
+  for (let b = 0; b < KEPT_BINS; b++) keptTexture.image.data[b] = Math.round((count > 0 ? kept[b] / count : 0) * 255);
+  keptTexture.needsUpdate = true;
 }
 
 // Coverage inside the discs: its mean, and the fraction of texels above each threshold

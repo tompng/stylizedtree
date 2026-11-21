@@ -36,11 +36,10 @@ export function rhombusPoint([c00, c10, c11, c01], u, v) {
     .normalize();
 }
 
-// Triangles of one rhombus, as indices into RHOMBUS_POINTS (the four corners, then the center):
-// split along the c00-c11 diagonal (an icosahedron edge), or into four around the center.
-export const RHOMBUS_POINTS = [[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0.5]];
+// The rhombus corners in rhombus coordinates, and its two triangles split along the c00-c11
+// diagonal (an icosahedron edge), as indices into RHOMBUS_CORNERS.
+export const RHOMBUS_CORNERS = [[0, 0], [1, 0], [1, 1], [0, 1]];
 export const RHOMBUS_HALVES = [[0, 1, 2], [0, 2, 3]];
-export const RHOMBUS_QUARTERS = [[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]];
 
 // Value at (u, v) of the piecewise-linear function given by `values` at `points` over `triangles`.
 // Values are numbers or objects with clone / multiplyScalar / addScaledVector (THREE vectors).

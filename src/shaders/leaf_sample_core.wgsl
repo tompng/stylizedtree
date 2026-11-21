@@ -8,8 +8,10 @@
 // moves to the averaged coverage scaled by far.x (farCoverageScale in leafAtlas.js), so a distant
 // layer is as opaque on average as it is up close and alpha-to-coverage turns that into sample coverage.
 // threshold (0..1) shrinks every leaf toward its own center via the leaf core field A; at 1 all leaves are gone.
+// The averaged A no longer marks the leaf centers, so a minified layer is scaled instead by the
+// fraction of leaf texels the threshold keeps, looked up in `kept` (updateKeptTexture in leafAtlas.js).
 // Gradients are explicit so a caller whose uv jumps between atlas cells can pass those of a continuous mapping.
-fn st_leafSampleGrad(tex: texture_2d<f32>, samp: sampler, uv: vec2f, ddx: vec2f, ddy: vec2f, cutoff: f32, far: vec4f, edge: vec4f, threshold: f32, shrink: vec4f) -> vec4f {
+fn st_leafSampleGrad(tex: texture_2d<f32>, samp: sampler, kept: texture_2d<f32>, keptSamp: sampler, uv: vec2f, ddx: vec2f, ddy: vec2f, cutoff: f32, far: vec4f, edge: vec4f, threshold: f32, shrink: vec4f) -> vec4f {
   let softness = edge.x;
   let edgeOutward = edge.z;
   let farScale = far.x;
@@ -28,9 +30,11 @@ fn st_leafSampleGrad(tex: texture_2d<f32>, samp: sampler, uv: vec2f, ddx: vec2f,
   let width = max(max(fwidth(c.r), min(softness, cutoff / below)), 0.0001);
   let sharp = clamp((c.r - cutoff) / width + below, 0.0, 1.0);
   let averaged = clamp(c.r * farScale, 0.0, 1.0);
-  let alpha = mix(sharp, averaged, smoothstep(farMipStart, farMipEnd, mip));
 
   let core = c.a * mix(1.0, c.g, leafVariation);
   let keep = clamp((core - threshold * (1.0 + shrinkSoftness)) / shrinkSoftness + 1.0, 0.0, 1.0);
-  return vec4f(alpha * keep, c.g, c.b, 0.0);
+  let bins = f32(textureDimensions(kept, 0).x);
+  let keptFraction = textureSampleLevel(kept, keptSamp, vec2f((clamp(threshold, 0.0, 1.0) * (bins - 1.0) + 0.5) / bins, 0.5), 0.0).r;
+  let alpha = mix(sharp * keep, averaged * keptFraction, smoothstep(farMipStart, farMipEnd, mip));
+  return vec4f(alpha, c.g, c.b, 0.0);
 }

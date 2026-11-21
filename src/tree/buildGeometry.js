@@ -2,9 +2,7 @@ import * as THREE from 'three/webgpu';
 import { Rng } from '../math.js';
 import { ClusterOcclusion } from './clusterOcclusion.js';
 import { clusterNormal, clusterSurfacePoint } from './clusterShape.js';
-import {
-  RHOMBUS_HALVES, RHOMBUS_POINTS, RHOMBUS_QUARTERS, interpolateOnTriangles, rhombusPoint, triacontahedronRhombi,
-} from './clusterTiling.js';
+import { RHOMBUS_CORNERS, RHOMBUS_HALVES, interpolateOnTriangles, rhombusPoint, triacontahedronRhombi } from './clusterTiling.js';
 
 export const defaultShellParams = {
   patchDivisions: 2,
@@ -64,7 +62,7 @@ class AttributeWriter {
 
 export function buildTreeAsset(tree, shellParams) {
   const occlusion = new ClusterOcclusion(tree);
-  const tiling = clusterTilings(tree, shellParams, occlusion);
+  const tilings = clusterTilings(tree, occlusion);
   const innerTurns = innerTurnQuaternions(tree);
   return {
     tree,
@@ -72,15 +70,14 @@ export function buildTreeAsset(tree, shellParams) {
     sphereTexture: buildSphereTexture(tree, innerTurns),
     counts: new THREE.Vector4(tree.clusters.length, tree.woodChains.length, 0, 0),
     crownInfo: new THREE.Vector4(tree.crownCenter.x, tree.crownCenter.y, tree.crownCenter.z, Math.max(tree.crownRadii.x, tree.crownRadii.z)),
-    core: buildCore(tree, tiling),
-    shell: buildShell(tree, occlusion, shellParams, tiling, innerTurns),
+    shell: buildShell(tree, occlusion, shellParams, tilings, innerTurns),
     wood: buildWood(tree, occlusion),
   };
 }
 
 export function disposeTreeAsset(asset) {
   asset.sphereTexture.dispose();
-  for (const part of [asset.core, asset.shell, asset.wood]) part.geometry.dispose();
+  for (const part of [asset.shell, asset.wood]) part.geometry.dispose();
 }
 
 // Rows: 0 = center + shadow radius, 1 = wood chain points, 2 = axes, 3 = leaf atlas pattern,
@@ -126,109 +123,20 @@ function randomQuaternion(rng) {
 
 // Each cluster is tiled by the 30 rhombi of a rhombic triacontahedron turned by a random rotation.
 // Corners 0 and 2 of every rhombus are icosahedron vertices, corners 1 and 3 centers of
-// icosahedron faces. The shell's patches subdivide these rhombi and collapse onto the core mesh
-// built over them: four triangles around each rhombus center when the patch grid has a vertex
-// there (even patchDivisions), otherwise two. Normals of the cluster shape are baked per vertex.
-function clusterTilings(tree, params, occlusion) {
+// icosahedron faces. Each corner carries its point on the cluster surface, the surface normal and AO.
+function clusterTilings(tree, occlusion) {
   const rng = new Rng(tree.seed * 7 + 11);
   const rhombi = triacontahedronRhombi();
-  const quartered = params.patchDivisions % 2 === 0;
-  return {
-    quartered,
-    topTriangles: quartered ? RHOMBUS_QUARTERS : RHOMBUS_HALVES,
-    clusters: tree.clusters.map((cluster, ci) => {
-      const rotation = new THREE.Quaternion().setFromAxisAngle(rng.unitVector(), rng.next() * Math.PI * 2);
-      const corners = rhombi.map((r) => r.map((d) => d.clone().applyQuaternion(rotation)));
-      const keys = new Map();
-      const dirs = [];
-      const vertexOf = (dir) => {
-        const key = dir.toArray().map((x) => Math.round(x * 1e5)).join(',');
-        if (!keys.has(key)) {
-          keys.set(key, dirs.length);
-          dirs.push(dir);
-        }
-        return keys.get(key);
-      };
-      const rhombusVertices = corners.map((rhombus) => {
-        const ids = rhombus.map(vertexOf);
-        if (quartered) ids.push(vertexOf(rhombusPoint(rhombus, 0.5, 0.5)));
-        return ids;
-      });
-      const positions = dirs.map((dir) => clusterSurfacePoint(cluster, dir));
+  return tree.clusters.map((cluster, ci) => {
+    const rotation = new THREE.Quaternion().setFromAxisAngle(rng.unitVector(), rng.next() * Math.PI * 2);
+    return rhombi.map((r) => {
+      const rhombus = r.map((d) => d.clone().applyQuaternion(rotation));
+      const positions = rhombus.map((dir) => clusterSurfacePoint(cluster, dir));
       const normals = positions.map((p) => clusterNormal(cluster, p));
       const ao = positions.map((p, i) => occlusion.occlusion(p.clone().addScaledVector(normals[i], 0.03), normals[i], ci));
-      return { corners, dirs, positions, normals, ao, rhombusVertices };
-    }),
-  };
-}
-
-// Core levels, each geomorphing into the next coarser one: 2 = four triangles per rhombus (only
-// when quartered), 1 = two, the rhombus centers moved to the midpoints of the c00-c11 diagonals,
-// 0 = the icosahedron, each face-center corner moved to the centroid of its icosahedron face,
-// which flattens the three triangles around it into that face. Morph targets are averages of the
-// coarser vertices, unnormalized for normals as well, since that is what the coarser triangles
-// interpolate there.
-function buildCore(tree, tiling) {
-  const topLevel = tiling.quartered ? 2 : 1;
-  const groups = tree.clusters.map((cluster, ci) => {
-    const { dirs, positions, normals, ao, rhombusVertices } = tiling.clusters[ci];
-    const birth = dirs.map(() => 0);
-    const target = positions.map((pos, i) => ({ pos, normal: normals[i] }));
-    const average = (ids) => ({
-      pos: ids.reduce((sum, id) => sum.add(positions[id]), new THREE.Vector3()).divideScalar(ids.length),
-      normal: ids.reduce((sum, id) => sum.add(normals[id]), new THREE.Vector3()).divideScalar(ids.length),
+      return { rhombus, positions, normals, ao };
     });
-    const faceCorners = new Map();
-    for (const ids of rhombusVertices) {
-      for (const k of [1, 3]) {
-        if (!faceCorners.has(ids[k])) faceCorners.set(ids[k], new Set());
-        faceCorners.get(ids[k]).add(ids[0]).add(ids[2]);
-      }
-    }
-    const icosahedronFaces = [];
-    for (const [center, set] of faceCorners) {
-      const [a, b, c] = [...set];
-      birth[center] = 1;
-      target[center] = average([a, b, c]);
-      const normal = dirs[b].clone().sub(dirs[a]).cross(dirs[c].clone().sub(dirs[a]));
-      icosahedronFaces.push(...(normal.dot(dirs[center]) > 0 ? [a, b, c] : [a, c, b]));
-    }
-    if (tiling.quartered) {
-      for (const ids of rhombusVertices) {
-        birth[ids[4]] = 2;
-        target[ids[4]] = average([ids[0], ids[2]]);
-      }
-    }
-    const rhombusFaces = (triangles) => rhombusVertices.flatMap((ids) => triangles.flatMap((t) => t.map((k) => ids[k])));
-    const levels = [icosahedronFaces, rhombusFaces(RHOMBUS_HALVES)];
-    if (tiling.quartered) levels.push(rhombusFaces(RHOMBUS_QUARTERS));
-    return { cluster, ci, positions, normals, ao, birth, target, levels };
   });
-
-  const vertexCount = groups.reduce((sum, g) => sum + g.positions.length, 0);
-  const w = new AttributeWriter(vertexCount, {
-    position: 3, morphPos: 3, normal: 3, morphNormal: 3, coreData: 4, cCenter: 3, ao: 1,
-  });
-  const levelIndices = Array.from({ length: topLevel + 1 }, () => tree.clusters.map(() => []));
-  let base = 0;
-  for (const { cluster, ci, positions, normals, ao, birth, target, levels } of groups) {
-    positions.forEach((p, vi) => {
-      const index = base + vi;
-      w.setVector('position', index, p);
-      w.setVector('morphPos', index, target[vi].pos);
-      w.setVector('normal', index, normals[vi]);
-      w.setVector('morphNormal', index, target[vi].normal);
-      w.set('coreData', index, birth[vi], ci, 0, 0);
-      w.setVector('cCenter', index, cluster.center);
-      w.set('ao', index, ao[vi]);
-    });
-    levels.forEach((faces, level) => {
-      for (const v of faces) levelIndices[level][ci].push(base + v);
-    });
-    base += positions.length;
-  }
-  const { indices, ranges } = concatLevels(levelIndices);
-  return { geometry: w.toGeometry(indices), ranges, maxLevel: topLevel };
 }
 
 // levelIndices[level][cluster] -> one index buffer ordered by level (finest first), then by
@@ -297,77 +205,124 @@ function flareMean(k) {
 }
 
 // At rest (near offset 0) the patches tile each cluster surface exactly, edge to edge, and every
-// fragment looks up the leaf atlas from its own surface direction, so the tiled shell and the
-// core mesh show the same leaves. Up close each patch is scaled up around its center (overlap),
-// pushed inward (depth) and curled (flare); its leaves stay attached to it, so their size follows
-// the patch's scale times the surface magnification times the depth scale. The curl is shifted
-// along the normal by its mean at each grid level (flareMean), so neither curling nor coarsening
-// the grid moves the patch's leaves in or out on average: with one segment only the corners carry
-// the curl, which would otherwise lift the whole flat patch by its full height.
+// fragment looks up the leaf atlas from the direction of its rest position. Each patch is scaled up
+// around its center (overlap), pushed inward (depth) and curled (flare); its leaves stay attached
+// to it, so their size follows the patch's scale times the surface magnification times the depth
+// scale. The curl is shifted along the normal by its mean at each grid level (flareMean), so
+// neither curling nor coarsening the grid moves the patch's leaves in or out on average: with one
+// segment only the corners carry the curl, which would otherwise lift the whole flat patch by its
+// full height.
 //
 // Each patch is stored once per grid level, from gridSegments segments down to one (patchData.z),
-// and a level's vertices geomorph (morph* attributes) onto the next coarser representation so that
+// and each rhombus once more as a flat card of two triangles (level 0), placed like a patch of its
+// own. A level's vertices geomorph (morph* attributes) onto the next coarser representation so that
 // every switch happens between identical meshes. Vertices placed on a coarser surface at their own
 // patch coordinates only match it when the finer triangles do not straddle its creases, which
-// holds for nested grids (two segments into one, one segment onto the core) but not for k into
-// k - 1 segments with k >= 3. There the middle column and row of cells collapse instead: the grid
-// lines on either side move onto one line of the coarser grid, the strip between them degenerates,
-// and every other cell becomes a coarser cell, patch coordinates included. All cells of a patch
-// share one diagonal direction, chosen so that the one-segment cell lies flat on the core triangles.
-function buildShell(tree, occlusion, params, tiling, innerTurns) {
+// holds for nested grids (two segments into one) but not for k into k - 1 segments with k >= 3.
+// There the middle column and row of cells collapse instead: the grid lines on either side move
+// onto one line of the coarser grid, the strip between them degenerates, and every other cell
+// becomes a coarser cell, patch coordinates included.
+//
+// One-segment patches merge into their rhombus's card: each vertex moves to where the card's
+// placement puts its rhombus coordinates, so the patches spread out from the card's center by its
+// scale until they tile the card, keeping the size of their leaves, and level with its depth. The
+// card's crease is the c00-c11 diagonal, which every cell's diagonal follows, so the patches on it
+// fold along with the card. The morph targets carry the card's patch coordinates, center, depth,
+// random value and inner layer shift too, so that the fades, wind, shading and inner layer reach
+// the card's at the switch.
+function buildShell(tree, occlusion, params, tilings, innerTurns) {
   const rng = new Rng(tree.seed * 7 + 3);
+  const cardRng = new Rng(tree.seed * 7 + 5);
   const n = params.patchDivisions;
   const segments = Math.max(1, Math.round(params.gridSegments));
-  const leafClusters = tree.clusters;
-  const rhombusCount = tiling.clusters[0].corners.length;
-  const patchCount = leafClusters.length * rhombusCount * n * n;
+  const rhombusCount = tilings[0].length;
+  const cardCount = tree.clusters.length * rhombusCount;
+  const patchCount = cardCount * n * n;
   let perPatch = 0;
   for (let k = 1; k <= segments; k++) perPatch += (k + 1) ** 2;
-  const w = new AttributeWriter(patchCount * perPatch, {
-    position: 3, nearOffset: 3, patchCenter: 4, patchUv: 2, patchData: 4, nPatchAo: 4,
-    morphFar: 3, morphOffset: 3, morphNormalAo: 4, morphUv: 2, proxyNormal: 3, morphProxy: 3, innerShift: 1,
+  const w = new AttributeWriter(patchCount * perPatch + cardCount * 4, {
+    position: 3, nearOffset: 3, patchCenter: 4, patchUv: 2, patchData: 4, nPatchAo: 4, innerShift: 2,
+    morphFar: 3, morphOffset: 3, morphNormalAo: 4, morphPatch: 4, morphCenter: 4, proxyNormal: 3, morphProxy: 3,
   });
   const levelIndices = Array.from({ length: segments + 1 }, () => tree.clusters.map(() => []));
-  const { topTriangles } = tiling;
   const scale = Math.sqrt(Math.max(params.overlap, 1));
   const flareMeans = Array.from({ length: segments + 1 }, (_, k) => (k > 0 ? flareMean(k) : 0));
   let maxOffset = 0;
   let vertex = 0;
 
-  leafClusters.forEach((cluster, ci) => {
-    const { corners, positions, normals: coreNormals, ao: coreAo, rhombusVertices } = tiling.clusters[ci];
-    const magnifications = corners.map((rhombus) =>
+  // value: geometry at the vertex (far, offset, normal, ao, proxy); patch: per-patch values.
+  const writeVertex = (own, target, level, ci) => {
+    maxOffset = Math.max(maxOffset, own.value.offset.length());
+    w.setVector('position', vertex, own.value.far);
+    w.setVector('nearOffset', vertex, own.value.offset);
+    w.setVector('patchCenter', vertex, own.patch.nearCenter, own.patch.radius);
+    w.set('patchUv', vertex, ...own.uv);
+    w.set('patchData', vertex, own.patch.depth, own.patch.rand, level, ci);
+    w.setVector('nPatchAo', vertex, own.value.normal, own.value.ao);
+    w.set('innerShift', vertex, own.patch.innerShift, target.patch.innerShift);
+    w.setVector('morphFar', vertex, target.value.far);
+    w.setVector('morphOffset', vertex, target.value.offset);
+    w.setVector('morphNormalAo', vertex, target.value.normal, target.value.ao);
+    w.set('morphPatch', vertex, ...target.uv, target.patch.depth, target.patch.rand);
+    w.setVector('morphCenter', vertex, target.patch.nearCenter, target.patch.radius);
+    w.setVector('proxyNormal', vertex, own.value.proxy);
+    w.setVector('morphProxy', vertex, target.value.proxy);
+    return vertex++;
+  };
+
+  tree.clusters.forEach((cluster, ci) => {
+    const tiling = tilings[ci];
+    const magnifications = tiling.map(({ rhombus }) =>
       Array.from({ length: n * n }, (_, k) => patchMagnification(cluster, rhombus, k % n, Math.floor(k / n), n)));
-    const meanMagnification = magnifications.flat().reduce((sum, m) => sum + m, 0) / (corners.length * n * n);
-    corners.forEach((rhombus, ri) => {
-      const corePositions = rhombusVertices[ri].map((id) => positions[id]);
-      const coreAoValues = rhombusVertices[ri].map((id) => coreAo[id]);
-      const coreNormalValues = rhombusVertices[ri].map((id) => coreNormals[id]);
+    const meanMagnification = magnifications.flat().reduce((sum, m) => sum + m, 0) / (rhombusCount * n * n);
+    // Scaled up by `grow` around `center` on the surface, then toward the cluster center by nearScale.
+    const placement = (random, center, magnification) => {
+      const depth = random.next();
+      const nearScale = 1 - params.depth * depth;
+      let grow = scale * random.range(0.9, 1.1);
+      if (params.leafSizeCompensation) {
+        const compensation = (meanMagnification / magnification) * ((1 - params.depth / 2) / nearScale);
+        // Below 1 the scaled patches would no longer cover the surface between them.
+        grow = Math.min(Math.max(grow * compensation, 1), grow * 2);
+      }
+      const nearCenter = center.clone().sub(cluster.center).multiplyScalar(nearScale).add(cluster.center);
+      return {
+        depth,
+        center,
+        nearScale,
+        nearCenter,
+        innerShift: innerLayerShift(cluster, nearCenter, innerTurns[ci], params.depth),
+        near: (far) => far.clone().sub(center).multiplyScalar(grow).add(center)
+          .sub(cluster.center).multiplyScalar(nearScale).add(cluster.center),
+      };
+    };
+
+    tiling.forEach(({ rhombus, positions, normals, ao }, ri) => {
+      const card = placement(cardRng, clusterSurfacePoint(cluster, rhombusPoint(rhombus, 0.5, 0.5)), patchMagnification(cluster, rhombus, 0, 0, 1));
+      card.rand = cardRng.next();
+      const onCard = (values, u, v) => interpolateOnTriangles(RHOMBUS_HALVES, RHOMBUS_CORNERS, values, u, v);
+      const lift = cardLift(cluster, card, (u, v) => card.near(onCard(positions, u, v)));
+      const cardAt = (u, v) => {
+        const far = onCard(positions, u, v);
+        const normal = onCard(normals, u, v);
+        return { far, offset: card.near(far).add(lift).sub(far), normal, ao: onCard(ao, u, v), proxy: normal };
+      };
+      const cardCorners = RHOMBUS_CORNERS.map(([u, v]) => cardAt(u, v));
+      card.radius = Math.max(...cardCorners.map(({ far, offset }) => far.clone().add(offset).distanceTo(card.nearCenter)));
+
       for (let j = 0; j < n; j++) {
         for (let i = 0; i < n; i++) {
-          const depth = rng.next();
-          const nearScale = 1 - params.depth * depth;
-          let grow = scale * rng.range(0.9, 1.1);
-          if (params.leafSizeCompensation) {
-            const compensation = (meanMagnification / magnifications[ri][j * n + i]) * ((1 - params.depth / 2) / nearScale);
-            // Below 1 the scaled patches would no longer cover the surface between them.
-            grow = Math.min(Math.max(grow * compensation, 1), grow * 2);
-          }
+          const patch = placement(rng, clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + 0.5) / n, (j + 0.5) / n)), magnifications[ri][j * n + i]);
           const flare = params.flare * rng.range(0.7, 1.3);
-          const rand = rng.next();
+          patch.rand = rng.next();
           const flip = rng.next() < 0.5;
           const flareSign = params.flareDirection === 'inward' || (params.flareDirection === 'random' && flip) ? -1 : 1;
-          const center = clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + 0.5) / n, (j + 0.5) / n));
-          const nearCenter = center.clone().sub(cluster.center).multiplyScalar(nearScale).add(cluster.center);
-          const innerShift = innerLayerShift(cluster, nearCenter, innerTurns[ci], params.depth);
           const farAt = (su, sv) => clusterSurfacePoint(cluster, rhombusPoint(rhombus, (i + su) / n, (j + sv) / n));
           const nearAt = (su, sv, k, far = farAt(su, sv)) => {
             const s = 2 * su - 1;
             const t = 2 * sv - 1;
             const curl = (s * s + t * t) / 2 - flareMeans[k];
-            return far.clone().sub(center).multiplyScalar(grow).add(center)
-              .sub(cluster.center).multiplyScalar(nearScale).add(cluster.center)
-              .addScaledVector(clusterNormal(cluster, far), flareSign * flare * cluster.radius * nearScale * curl);
+            return patch.near(far).addScaledVector(clusterNormal(cluster, far), flareSign * flare * cluster.radius * patch.nearScale * curl);
           };
           const cache = new Map();
           const surfaceAt = (su, sv) => {
@@ -375,33 +330,30 @@ function buildShell(tree, occlusion, params, tiling, innerTurns) {
             if (!cache.has(key)) {
               const far = farAt(su, sv);
               const proxy = clusterNormal(cluster, far);
-              const ao = occlusion.occlusion(far.clone().addScaledVector(proxy, 0.03), proxy, ci);
-              cache.set(key, { far, proxy, ao });
+              const surfaceAo = occlusion.occlusion(far.clone().addScaledVector(proxy, 0.03), proxy, ci);
+              cache.set(key, { far, proxy, ao: surfaceAo });
             }
             return cache.get(key);
           };
           const sampleAt = (su, sv, k) => {
-            const { far, proxy, ao } = surfaceAt(su, sv);
+            const { far, proxy, ao: surfaceAo } = surfaceAt(su, sv);
             const near = nearAt(su, sv, k, far);
             const e = 1e-3;
             const normal = nearAt(su + e, sv, k).sub(nearAt(su - e, sv, k)).cross(nearAt(su, sv + e, k).sub(nearAt(su, sv - e, k))).normalize();
             if (normal.dot(proxy) < 0) normal.negate();
-            return { far, near, offset: near.clone().sub(far), normal, ao, proxy };
+            return { far, near, offset: near.clone().sub(far), normal, ao: surfaceAo, proxy };
           };
           const grids = [];
           for (let k = 1; k <= segments; k++) {
             grids[k] = Array.from({ length: (k + 1) ** 2 }, (_, idx) => sampleAt((idx % (k + 1)) / k, Math.floor(idx / (k + 1)) / k, k));
           }
-          const antiDiagonal = tiling.quartered && i + j === n - 1;
           const onGrid = (k, su, sv, name) => {
             const cu = Math.min(Math.floor(su * k), k - 1);
             const cv = Math.min(Math.floor(sv * k), k - 1);
             const at = (du, dv) => grids[k][(cv + dv) * (k + 1) + cu + du][name];
-            const cellPoints = [[0, 0], [1, 0], [1, 1], [0, 1]];
-            const triangles = antiDiagonal ? [[0, 1, 3], [1, 2, 3]] : [[0, 1, 2], [0, 2, 3]];
-            return interpolateOnTriangles(triangles, cellPoints, [at(0, 0), at(1, 0), at(1, 1), at(0, 1)], su * k - cu, sv * k - cv);
+            return interpolateOnTriangles(RHOMBUS_HALVES, RHOMBUS_CORNERS, [at(0, 0), at(1, 0), at(1, 1), at(0, 1)], su * k - cu, sv * k - cv);
           };
-          const patchRadius = Math.max(...grids[segments].map(({ near }) => near.distanceTo(nearCenter)));
+          patch.radius = Math.max(...grids[segments].map(({ near }) => near.distanceTo(patch.nearCenter)));
 
           for (let k = segments; k >= 1; k--) {
             const base = vertex;
@@ -409,42 +361,21 @@ function buildShell(tree, occlusion, params, tiling, innerTurns) {
               const su = (idx % (k + 1)) / k;
               const sv = Math.floor(idx / (k + 1)) / k;
               let target;
-              let targetUv = [su, sv];
               if (k > 2) {
                 const collapsed = Math.floor((k - 1) / 2);
                 const line = (x) => (x <= collapsed ? x : x - 1);
                 const cu = line(idx % (k + 1));
                 const cv = line(Math.floor(idx / (k + 1)));
-                target = grids[k - 1][cv * k + cu];
-                targetUv = [cu / (k - 1), cv / (k - 1)];
+                target = { value: grids[k - 1][cv * k + cu], uv: [cu / (k - 1), cv / (k - 1)], patch };
               } else if (k === 2) {
-                target = ['far', 'offset', 'normal', 'ao', 'proxy'].reduce((t, f) => ({ ...t, [f]: onGrid(1, su, sv, f) }), {});
+                const onCoarse = ['far', 'offset', 'normal', 'ao', 'proxy'].reduce((t, f) => ({ ...t, [f]: onGrid(1, su, sv, f) }), {});
+                target = { value: onCoarse, uv: [su, sv], patch };
               } else {
-                const U = (i + su) / n;
-                const V = (j + sv) / n;
-                target = {
-                  far: interpolateOnTriangles(topTriangles, RHOMBUS_POINTS, corePositions, U, V),
-                  offset: value.offset,
-                  normal: value.normal,
-                  ao: interpolateOnTriangles(topTriangles, RHOMBUS_POINTS, coreAoValues, U, V),
-                  proxy: interpolateOnTriangles(topTriangles, RHOMBUS_POINTS, coreNormalValues, U, V),
-                };
+                const u = (i + su) / n;
+                const v = (j + sv) / n;
+                target = { value: cardAt(u, v), uv: [u, v], patch: card };
               }
-              maxOffset = Math.max(maxOffset, value.offset.length());
-              w.setVector('position', vertex, value.far);
-              w.setVector('nearOffset', vertex, value.offset);
-              w.setVector('patchCenter', vertex, nearCenter, patchRadius);
-              w.set('patchUv', vertex, su, sv);
-              w.set('patchData', vertex, depth, rand, k, ci);
-              w.set('innerShift', vertex, innerShift);
-              w.setVector('nPatchAo', vertex, value.normal, value.ao);
-              w.setVector('morphFar', vertex, target.far);
-              w.setVector('morphOffset', vertex, target.offset);
-              w.setVector('morphNormalAo', vertex, target.normal, target.ao);
-              w.set('morphUv', vertex, ...targetUv);
-              w.setVector('proxyNormal', vertex, value.proxy);
-              w.setVector('morphProxy', vertex, target.proxy);
-              vertex++;
+              writeVertex({ value, uv: [su, sv], patch }, target, k, ci);
             });
             for (let iv = 0; iv < k; iv++) {
               for (let iu = 0; iu < k; iu++) {
@@ -452,19 +383,48 @@ function buildShell(tree, occlusion, params, tiling, innerTurns) {
                 const b = a + 1;
                 const c = a + k + 1;
                 const d = c + 1;
-                const faces = antiDiagonal ? [a, b, c, b, d, c] : [a, b, d, a, d, c];
-                for (const f of faces) levelIndices[k][ci].push(f);
+                for (const f of [a, b, d, a, d, c]) levelIndices[k][ci].push(f);
               }
             }
           }
         }
       }
+
+      const corners = cardCorners.map((value, q) => writeVertex(
+        { value, uv: RHOMBUS_CORNERS[q], patch: card },
+        { value, uv: RHOMBUS_CORNERS[q], patch: card },
+        0,
+        ci,
+      ));
+      for (const triangle of RHOMBUS_HALVES) for (const q of triangle) levelIndices[0][ci].push(corners[q]);
     });
   });
   const { indices, ranges } = concatLevels(levelIndices);
   const geometry = w.toGeometry(indices, { interleave: true });
   geometry.boundingSphere.radius += maxOffset;
   return { geometry, patchCount, ranges, segments };
+}
+
+// A flat card sits below the curved surface it spans, the more so the larger it is scaled up.
+// This is the lift along the radial direction of the card's center that brings the card's mean
+// height, weighted like the leaves that remain on it (flareMean), back to its depth layer.
+function cardLift(cluster, card, nearAt) {
+  const radial = card.nearCenter.clone().sub(cluster.center);
+  const layer = radial.length();
+  radial.normalize();
+  const samples = 16;
+  let sum = 0;
+  let weight = 0;
+  for (let iv = 0; iv < samples; iv++) {
+    for (let iu = 0; iu < samples; iu++) {
+      const u = (iu + 0.5) / samples;
+      const v = (iv + 0.5) / samples;
+      const w = u * (1 - u) * v * (1 - v);
+      sum += (nearAt(u, v).sub(cluster.center).dot(radial) - layer) * w;
+      weight += w;
+    }
+  }
+  return radial.multiplyScalar(-sum / weight);
 }
 
 // Each branch is a grid of rings (along the curve) by radial vertices, drawn at three detail

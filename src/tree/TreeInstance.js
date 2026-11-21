@@ -5,7 +5,6 @@ import { evaluateLod, shellGridLevel } from './lod.js';
 
 const TINTS = {
   shell: [0.95, 0.35, 0.3],
-  core: [0.3, 0.85, 0.35],
   inner: [0.95, 0.8, 0.25],
   wood: [0, 0, 0],
 };
@@ -76,17 +75,16 @@ export class TreeInstance {
       woodLod: new THREE.Vector4(),
       decal: new THREE.Vector4(),
     };
-    // Shell, core and inner ball pick their level per cluster: the materials read clusterLod by
-    // cluster index, and each mesh draws its clusters' ranges as geometry groups (material arrays).
+    // Shell and inner layer pick their level per cluster: the materials read clusterLod by cluster
+    // index, and each mesh draws its clusters' ranges as geometry groups (material arrays).
     const clusterCount = asset.tree.clusters.length;
-    this.clusterLod = Array.from({ length: clusterCount * 3 }, () => new THREE.Vector4());
-    this.clusterLevels = { shell: new Array(clusterCount), core: new Array(clusterCount), inner: new Array(clusterCount) };
+    this.clusterLod = Array.from({ length: clusterCount * 2 }, () => new THREE.Vector4());
+    this.clusterLevels = { shell: new Array(clusterCount), inner: new Array(clusterCount) };
     this.shell = this.addMesh(shareGeometry(asset.shell.geometry), [materials.shell], 'shell');
-    this.core = this.addMesh(shareGeometry(asset.core.geometry), [materials.core], 'core');
     this.inner = this.addMesh(shareGeometry(asset.shell.geometry), [materials.inner], 'inner');
     // Drawn after the shell in front of it, so the depth test drops what the shell already covers.
     this.inner.renderOrder = 1;
-    for (const mesh of [this.shell, this.core, this.inner]) mesh.userData.clusterLod = this.clusterLod;
+    for (const mesh of [this.shell, this.inner]) mesh.userData.clusterLod = this.clusterLod;
     this.wood = this.addMesh(shareGeometry(asset.wood.geometry), materials.wood, 'wood');
     this.decal = this.addMesh(decalGeometry, materials.decal, 'wood');
     this.decal.frustumCulled = false;
@@ -106,7 +104,7 @@ export class TreeInstance {
   }
 
   dispose() {
-    for (const mesh of [this.shell, this.core, this.inner, this.wood]) mesh.geometry.dispose();
+    for (const mesh of [this.shell, this.inner, this.wood]) mesh.geometry.dispose();
   }
 
   update({ camera, viewportHeight, lodSettings, sunWorld, wind, time, tintAmount, showInner, atlases }) {
@@ -139,39 +137,34 @@ export class TreeInstance {
     const level = levelAt(this.distance);
     const e = evaluateLod(level, lodSettings);
     ({ level: e.shellLevel, morph: e.shellMorph } = shellGridLevel(level, lodSettings, asset.shell.segments));
-    ({ level: e.coreLevel, morph: e.coreMorph } = steppedLevel(e.corePoly, asset.core.maxLevel));
     ({ level: e.woodDetail, morph: e.woodMorph } = steppedLevel(e.woodPoly, asset.wood.ranges.length - 1));
     this.lod = e;
 
     state.wood.set(1, e.limbScale, e.twigScale, 0);
     state.woodLod.set(e.woodDetail, e.woodMorph, 0, 0);
 
-    const { shell: shellLevels, core: coreLevels, inner: innerLevels } = this.clusterLevels;
+    const { shell: shellLevels, inner: innerLevels } = this.clusterLevels;
+    const farScale = farCoverageScale(atlases.leaf, lodSettings.cutoff);
     asset.tree.clusters.forEach((cluster, ci) => {
       clusterWorld.copy(cluster.center).applyMatrix4(this.group.matrixWorld);
       const clusterLevel = levelAt(Math.max(camera.position.distanceTo(clusterWorld), 0.01));
-      const c = evaluateLod(clusterLevel, lodSettings);
+      const { innerFade } = evaluateLod(clusterLevel, lodSettings);
       const shell = shellGridLevel(clusterLevel, lodSettings, asset.shell.segments);
-      const core = steppedLevel(c.corePoly, asset.core.maxLevel);
-      this.clusterLod[ci * 3].set(c.near, shell.level, shell.morph, c.cutoff);
-      this.clusterLod[ci * 3 + 1].set(c.innerFade, core.level, core.morph, 0);
-      this.clusterLod[ci * 3 + 2].set(farCoverageScale(atlases.leaf, c.cutoff), 0, 0, 0);
-      shellLevels[ci] = c.shellActive ? shell.level : -1;
-      coreLevels[ci] = c.shellActive ? -1 : core.level;
-      innerLevels[ci] = showInner && c.innerFade < 1 ? shell.level : -1;
+      this.clusterLod[ci * 2].set(innerFade, shell.level, shell.morph, lodSettings.cutoff);
+      this.clusterLod[ci * 2 + 1].set(farScale, 0, 0, 0);
+      shellLevels[ci] = shell.level;
+      innerLevels[ci] = showInner && innerFade < 1 ? shell.level : -1;
     });
     e.clusterDraws = [
       setClusterGroups(this.shell, asset.shell.ranges, shellLevels),
-      setClusterGroups(this.core, asset.core.ranges, coreLevels),
       setClusterGroups(this.inner, asset.shell.ranges, innerLevels),
     ];
-    e.shellClusters = shellLevels.filter((l) => l >= 0).length;
 
     const woodLevel = e.twigScale > 0 ? 2 : e.limbScale > 0 ? 1 : 0;
     const woodRange = asset.wood.ranges[e.woodDetail];
     this.wood.geometry.setDrawRange(woodRange.start, woodRange.countUpTo[woodLevel]);
 
-    for (const mesh of [this.shell, this.core, this.inner]) mesh.userData.tint.w = tintAmount;
+    for (const mesh of [this.shell, this.inner]) mesh.userData.tint.w = tintAmount;
     this.updateDecal();
   }
 
