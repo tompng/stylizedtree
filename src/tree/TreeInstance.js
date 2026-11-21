@@ -107,6 +107,13 @@ export class TreeInstance {
     for (const mesh of [this.shell, this.inner, this.wood]) mesh.geometry.dispose();
   }
 
+  // Triangles the leaf meshes (shell and inner layer) and the wood draw within `frustum`.
+  triangleCounts(frustum) {
+    const drawn = (mesh, indices) => (mesh.visible && frustum.intersectsObject(mesh) ? indices / 3 : 0);
+    const grouped = (mesh) => drawn(mesh, mesh.geometry.groups.reduce((sum, group) => sum + group.count, 0));
+    return { leaves: grouped(this.shell) + grouped(this.inner), wood: drawn(this.wood, this.wood.geometry.drawRange.count) };
+  }
+
   update({ camera, viewportHeight, lodSettings, sunWorld, wind, time, tintAmount, showInner, atlases }) {
     const { asset, state } = this;
     this.group.updateMatrixWorld();

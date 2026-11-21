@@ -229,6 +229,8 @@ const sunWorld = new THREE.Vector3();
 let elapsed = 0;
 let lastTime = performance.now();
 let hudTimer = 0;
+const frustum = new THREE.Frustum();
+const viewProjection = new THREE.Matrix4();
 
 function nearestTree() {
   let best = trees[0];
@@ -240,12 +242,20 @@ function updateHud(focus) {
   const e = focus.lod;
   const info = renderer.info.render;
   const fmt = (x, d = 2) => x.toFixed(d);
+  frustum.setFromProjectionMatrix(viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse), camera.coordinateSystem);
+  let leaves = 0;
+  let wood = 0;
+  for (const tree of trees) {
+    const counts = tree.triangleCounts(frustum);
+    leaves += counts.leaves;
+    wood += counts.wood;
+  }
   const rows = [
     `L ${fmt(e.level)}   crown radius ${fmt(focus.radiusPx, 0)}px   dist ${fmt(focus.distance, 0)}m`,
     `shell  ${e.shellLevel > 0 ? `grid ${e.shellLevel}` : 'cards'}  morph ${fmt(e.shellMorph)}  patches ${asset.shell.patchCount}`,
     `draws  shell/inner ${e.clusterDraws.join(' / ')}`,
     `wood   detail ${e.woodDetail}  morph ${fmt(e.woodMorph)}`,
-    `frame  ${fmt(info.triangles, 0)} tris  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
+    `frame  ${fmt(info.triangles, 0)} tris (leaves ${leaves}, wood ${wood})  ${info.drawCalls ?? info.calls} draws   build ${fmt(buildMs, 0)}ms`,
     `atlas  ${atlasParams.cell * 2}px  ${atlases.leaf.userData.leafCounts.join(' / ')} leaves per sphere`,
   ];
   hud.textContent = rows.join('\n');
